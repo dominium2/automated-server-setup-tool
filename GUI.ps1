@@ -182,6 +182,57 @@ function Get-AllServerConfigs {
     return $allConfigs
 }
 
+# Function to validate IP address format
+function Test-IPAddress {
+    param([string]$IP)
+    
+    if ([string]::IsNullOrWhiteSpace($IP)) {
+        return $false
+    }
+    
+    # Check if it's a valid IPv4 address or hostname
+    $ipPattern = '^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+    $hostnamePattern = '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
+    
+    return ($IP -match $ipPattern) -or ($IP -match $hostnamePattern)
+}
+
+# Function to validate all server configurations
+function Test-ServerConfigs {
+    param($Configs)
+    
+    $validationErrors = @()
+    
+    foreach ($config in $Configs) {
+        $serverNum = $config.ServerNumber
+        
+        # Validate IP Address
+        if ([string]::IsNullOrWhiteSpace($config.IP)) {
+            $validationErrors += "Server $($serverNum): IP Address is required"
+        }
+        elseif (-not (Test-IPAddress $config.IP)) {
+            $validationErrors += "Server $($serverNum): Invalid IP Address format"
+        }
+        
+        # Validate Username
+        if ([string]::IsNullOrWhiteSpace($config.User)) {
+            $validationErrors += "Server $($serverNum): Username is required"
+        }
+        
+        # Validate Password
+        if ([string]::IsNullOrWhiteSpace($config.Password)) {
+            $validationErrors += "Server $($serverNum): Password is required"
+        }
+        
+        # Validate Service Selection
+        if ([string]::IsNullOrWhiteSpace($config.Service)) {
+            $validationErrors += "Server $($serverNum): Service selection is required"
+        }
+    }
+    
+    return $validationErrors
+}
+
 $reader = New-Object System.Xml.XmlNodeReader $xaml
 $window = [Windows.Markup.XamlReader]::Load( $reader )
 
@@ -200,6 +251,16 @@ $runSetupButton.Add_Click({
     # Collect all server configurations
     $allServerConfigs = Get-AllServerConfigs
     
+    # Validate configurations
+    $validationErrors = Test-ServerConfigs -Configs $allServerConfigs
+    
+    if ($validationErrors.Count -gt 0) {
+        # Show validation errors in a message box
+        $errorMessage = "Please fix the following errors:`n`n" + ($validationErrors -join "`n")
+        [System.Windows.MessageBox]::Show($errorMessage, "Validation Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
+        return
+    }
+    
     # Display configurations (for testing)
     Write-Host "`n========== Server Configurations ==========" -ForegroundColor Cyan
     Write-Host "Total Servers: $($allServerConfigs.Count)`n" -ForegroundColor Green
@@ -214,6 +275,7 @@ $runSetupButton.Add_Click({
     }
     
     Write-Host "==========================================" -ForegroundColor Cyan
+    Write-Host "Validation passed" -ForegroundColor Green
     
     # TODO: Pass $allServerConfigs to your automation scripts
     # Example: Start-ServerSetup -Configs $allServerConfigs
