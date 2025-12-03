@@ -1,7 +1,8 @@
 BeforeAll {
     # Simple approach: Load the entire GUI.ps1 content and extract function definitions
     # by parsing line by line
-    $guiLines = Get-Content -Path "$PSScriptRoot\GUI.ps1"
+    $guiPath = Join-Path $PSScriptRoot ".." "GUI.ps1"
+    $guiLines = Get-Content -Path $guiPath
     
     # Extract Test-IPAddress function
     $inIPFunction = $false
