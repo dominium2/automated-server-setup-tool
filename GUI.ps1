@@ -3,6 +3,9 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
+#Load modules
+. "$PSScriptRoot\modules\RemoteConnection.ps1"
+
 #Gui Design XML
 [xml]$xaml = @"
 <Window 
@@ -298,7 +301,28 @@ $runSetupButton.Add_Click({
     }
     
     Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "Validation passed" -ForegroundColor Green
+    Write-Host "Validation passed! Starting deployment...`n" -ForegroundColor Green
+    
+    # Test connections and deploy services
+    foreach ($config in $allServerConfigs) {
+        Write-Host "`n--- Processing Server $($config.ServerNumber) ---" -ForegroundColor Cyan
+        
+        # Test connection to the server
+        $connectionSuccess = Test-RemoteConnection -IP $config.IP -User $config.User -Password $config.Password
+        
+        if ($connectionSuccess) {
+            Write-Host "Successfully connected to $($config.IP)" -ForegroundColor Green
+            Write-Host "Deploying service: $($config.Service)" -ForegroundColor Yellow
+            
+            # TODO: Add service deployment logic here
+            # Example: Deploy-Service -Config $config
+        }
+        else {
+            Write-Host "Failed to connect to $($config.IP). Skipping..." -ForegroundColor Red
+        }
+    }
+    
+    Write-Host "`n========== Deployment Complete ==========" -ForegroundColor Cyan
     
     # TODO: Pass $allServerConfigs to your automation scripts
     # Example: Start-ServerSetup -Configs $allServerConfigs
