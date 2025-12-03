@@ -22,7 +22,7 @@ jobs:
     - name: Run Pester Tests
       shell: pwsh
       run: |
-        Invoke-Pester -Path ".\GUI.Tests.ps1" -Output Detailed -CI
+        Invoke-Pester -Path ".\tests\GUI.Tests.ps1" -Output Detailed -CI
     
     - name: Upload Test Results
       if: always()
