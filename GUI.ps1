@@ -4,7 +4,7 @@ Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
 #Load modules
-. "$PSScriptRoot\modules\RemoteConnection.ps1"
+Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
 
 #Gui Design XML
 [xml]$xaml = @"
