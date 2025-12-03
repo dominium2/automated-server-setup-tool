@@ -190,11 +190,34 @@ function Test-IPAddress {
         return $false
     }
     
-    # Check if it's a valid IPv4 address or hostname
-    $ipPattern = '^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$'
+    # Try to parse as IPv4 address first (most reliable method)
+    try {
+        $ipObj = [System.Net.IPAddress]::Parse($IP)
+        # Check if it's IPv4 (AddressFamily = InterNetwork)
+        if ($ipObj.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
+            # Additional validation: must have exactly 4 octets in original string
+            $octets = $IP.Split('.')
+            if ($octets.Count -eq 4) {
+                return $true
+            }
+        }
+    }
+    catch {
+        # Not a valid IP, continue to hostname check
+    }
+    
+    # Check if it's a valid hostname
+    # Hostname rules: 1-63 chars per label, alphanumeric + hyphens, cannot start/end with hyphen
     $hostnamePattern = '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
     
-    return ($IP -match $ipPattern) -or ($IP -match $hostnamePattern)
+    if ($IP -match $hostnamePattern) {
+        # Additional check: hostname shouldn't be all numbers with dots (would look like malformed IP)
+        if ($IP -notmatch '^\d+(\.\d+)*$') {
+            return $true
+        }
+    }
+    
+    return $false
 }
 
 # Function to validate all server configurations
