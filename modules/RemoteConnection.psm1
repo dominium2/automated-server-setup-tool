@@ -85,5 +85,42 @@ function Test-SSHConnection {
     }
 }
 
+function Test-WinRMConnection {
+    param (
+        [string]$IP,
+        [string]$User,
+        [string]$Password
+    )
+    
+    try {
+        Write-Host "Testing WinRM connection to $IP..." -ForegroundColor Cyan
+        
+        # Create credential object
+        $winSecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+        $winCredential = New-Object System.Management.Automation.PSCredential ($User, $winSecurePassword)
+        
+        # Test WinRM connection
+        $winSession = New-PSSession -ComputerName $IP -Credential $winCredential -ErrorAction Stop
+        
+        if ($winSession) {
+            Write-Host "WinRM connection successful!" -ForegroundColor Green
+            
+            # Test by running a command
+            $result = Invoke-Command -Session $winSession -ScriptBlock {
+                $env:COMPUTERNAME 
+            }
+            Write-Host "Connected to: $result" -ForegroundColor Green
+            
+            # Close session
+            Remove-PSSession -Session $winSession
+            return $true
+        }
+    }
+    catch {
+        Write-Host "WinRM connection failed: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
 # Export functions to make them available when module is imported
-Export-ModuleMember -Function Test-RemoteConnection, Test-SSHConnection
+Export-ModuleMember -Function Test-RemoteConnection, Test-SSHConnection, Test-WinRMConnection
