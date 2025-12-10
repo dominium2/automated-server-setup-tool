@@ -67,7 +67,7 @@ function Test-SSHConnection {
 
         #Create secure string from password
         $sshSecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-        $sshCredential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
+        $sshCredential = New-Object System.Management.Automation.PSCredential ($User, $sshSecurePassword)
 
         # Test SSH connection
         $sshSession = New-PSSession -HostName $IP -UserName $User -SSHTransport -ErrorAction Stop
