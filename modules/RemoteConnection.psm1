@@ -50,5 +50,40 @@ function Test-RemoteConnection {
     }
 }
 
+function Test-SSHConnection {
+    param (
+        [string]$IP,
+        [string]$User,
+        [string]$Password
+    )
+    
+    try {
+        Write-Host "Testing SSH connection to $IP..." -ForegroundColor Cyan
+
+        #Create secure string from password
+        $sshSecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+        $sshCredential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
+
+        # Test SSH connection
+        $sshSession = New-PSSession -HostName $IP -UserName $User -SSHTransport -ErrorAction Stop
+
+        if ($sshSession) {
+            Write-Host "SSH connection successful!" -ForegroundColor Green
+            
+            # Test by running a command
+            $result = Invoke-Command -Session $sshSession -ScriptBlock { hostname }
+            Write-Host "Connected to: $result" -ForegroundColor Green
+            
+            # Close session
+            Remove-PSSession -Session $sshSession
+            return $true
+        }
+    }
+    catch {
+        Write-Host "Error testing SSH connection to $IP : $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
 # Export functions to make them available when module is imported
-Export-ModuleMember -Function Test-RemoteConnection
+Export-ModuleMember -Function Test-RemoteConnection, Test-SSHConnection
