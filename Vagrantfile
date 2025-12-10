@@ -2,15 +2,16 @@
 # vi: set ft=ruby :
 
 Vagrant.configure("2") do |config|
-  # Define 3 Debian test servers
-  (1..3).each do |i|
-    config.vm.define "testserver#{i}" do |server|
+  
+  # Define 2 Linux (Debian) test servers
+  (1..2).each do |i|
+    config.vm.define "linux#{i}" do |server|
       server.vm.box = "debian/bullseye64"
-      server.vm.hostname = "testserver#{i}"
+      server.vm.hostname = "linux#{i}"
       server.vm.network "private_network", ip: "192.168.56.#{10+i}"
       
       server.vm.provider "virtualbox" do |vb|
-        vb.name = "HomeLab-TestServer#{i}"
+        vb.name = "HomeLab-Linux#{i}"
         vb.memory = "1024"
         vb.cpus = 1
       end
@@ -31,11 +32,49 @@ Vagrant.configure("2") do |config|
         # Allow sudo without password (for testing only!)
         echo 'testuser ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
         
-        # Configure SSH
+        # Configure SSH to allow password authentication
         sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        sed -i 's/PasswordAuthentication no/PasswordAuthentication yes/' /etc/ssh/sshd_config
+        sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+        
+        # Ensure password authentication is enabled
+        grep -q "^PasswordAuthentication" /etc/ssh/sshd_config || echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
+        
         systemctl restart sshd
         
-        echo "Server ready! IP: 192.168.56.#{10+i}"
+        echo "Linux server ready! IP: 192.168.56.#{10+i}"
+      SHELL
+    end
+  end
+  
+  # Define 2 Windows test servers
+  (1..2).each do |i|
+    config.vm.define "windows#{i}" do |server|
+      server.vm.box = "gusztavvargadr/windows-server-2022-standard"
+      server.vm.hostname = "windows#{i}"
+      server.vm.network "private_network", ip: "192.168.56.#{20+i}"
+      
+      server.vm.provider "virtualbox" do |vb|
+        vb.name = "HomeLab-Windows#{i}"
+        vb.memory = "2048"
+        vb.cpus = 2
+      end
+      
+      # Configure WinRM
+      server.vm.provision "shell", inline: <<-SHELL
+        # Enable WinRM
+        winrm quickconfig -q
+        winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+        winrm set winrm/config/service/auth '@{Basic="true"}'
+        
+        # Create test user
+        net user testuser testpass123 /add
+        net localgroup Administrators testuser /add
+        
+        # Configure firewall for WinRM
+        netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in localport=5985 protocol=TCP action=allow
+        
+        Write-Host "Windows server ready! IP: 192.168.56.#{20+i}"
       SHELL
     end
   end

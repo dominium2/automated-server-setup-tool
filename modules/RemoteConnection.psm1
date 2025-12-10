@@ -64,24 +64,40 @@ function Test-SSHConnection {
     
     try {
         Write-Host "Testing SSH connection to $IP..." -ForegroundColor Cyan
-
-        #Create secure string from password
-        $sshSecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-        $sshCredential = New-Object System.Management.Automation.PSCredential ($User, $sshSecurePassword)
-
-        # Test SSH connection
-        $sshSession = New-PSSession -HostName $IP -UserName $User -SSHTransport -ErrorAction Stop
-
-        if ($sshSession) {
-            Write-Host "SSH connection successful!" -ForegroundColor Green
+        
+        # Use plink if available (from PuTTY) for password-based SSH
+        if (Get-Command plink -ErrorAction SilentlyContinue) {
+            Write-Host "  Using plink for SSH connection..." -ForegroundColor Cyan
             
-            # Test by running a command
-            $result = Invoke-Command -Session $sshSession -ScriptBlock { hostname }
-            Write-Host "Connected to: $result" -ForegroundColor Green
+            # Create a temporary answer file to auto-accept host key
+            $tempAnswerFile = [System.IO.Path]::GetTempFileName()
+            Set-Content -Path $tempAnswerFile -Value "y"
             
-            # Close session
-            Remove-PSSession -Session $sshSession
-            return $true
+            try {
+                # Use the answer file to auto-accept host key, then connect
+                $result = Get-Content $tempAnswerFile | & plink -pw $Password $User@$IP "hostname" 2>&1
+                
+                if ($LASTEXITCODE -eq 0 -and $result -and $result -notmatch "FATAL ERROR" -and $result -notmatch "Access denied") {
+                    Write-Host "SSH connection successful!" -ForegroundColor Green
+                    Write-Host "Connected to: $result" -ForegroundColor Green
+                    return $true
+                }
+                else {
+                    Write-Host "SSH connection failed: $result" -ForegroundColor Red
+                    return $false
+                }
+            }
+            finally {
+                # Clean up temp file
+                if (Test-Path $tempAnswerFile) {
+                    Remove-Item $tempAnswerFile -Force
+                }
+            }
+        }
+        else {
+            Write-Host "  Error: 'plink' (PuTTY) is required for password-based SSH" -ForegroundColor Red
+            Write-Host "  Install with: choco install putty -y" -ForegroundColor Yellow
+            return $false
         }
     }
     catch {
