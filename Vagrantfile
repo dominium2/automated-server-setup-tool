@@ -54,10 +54,14 @@ Vagrant.configure("2") do |config|
       server.vm.hostname = "windows#{i}"
       server.vm.network "private_network", ip: "192.168.56.#{20+i}"
       
+      # Increase boot timeout for Windows VMs
+      server.vm.boot_timeout = 600
+      
       server.vm.provider "virtualbox" do |vb|
         vb.name = "HomeLab-Windows#{i}"
         vb.memory = "2048"
         vb.cpus = 2
+        vb.gui = false
       end
       
       # Configure WinRM
@@ -73,6 +77,9 @@ Vagrant.configure("2") do |config|
         
         # Configure firewall for WinRM
         netsh advfirewall firewall add rule name="WinRM-HTTP" dir=in localport=5985 protocol=TCP action=allow
+        
+        # Enable ICMP (ping) in Windows Firewall
+        netsh advfirewall firewall add rule name="ICMP Allow incoming V4 echo request" protocol=icmpv4:8,any dir=in action=allow
         
         Write-Host "Windows server ready! IP: 192.168.56.#{20+i}"
       SHELL
