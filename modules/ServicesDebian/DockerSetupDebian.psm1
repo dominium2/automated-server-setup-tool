@@ -130,15 +130,40 @@ function Install-Docker {
         Write-Host "  Adding user to docker group..." -ForegroundColor Cyan
         $groupResult = Invoke-SSHCommand "sudo usermod -aG docker $User"
         
-        # Verify installation
+        # Verify Docker installation
         $verifyResult = Invoke-SSHCommand "docker --version"
         if ($null -ne $verifyResult -and $verifyResult -match "Docker version") {
             Write-Host "Docker installed successfully: $verifyResult" -ForegroundColor Green
-            return $true
         }
         else {
             Write-Host "Docker installation completed but verification failed" -ForegroundColor Yellow
             return $false
+        }
+        
+        # Verify Docker Compose installation
+        Write-Host "  Verifying Docker Compose..." -ForegroundColor Cyan
+        $composeResult = Invoke-SSHCommand "docker compose version"
+        if ($null -ne $composeResult -and $composeResult -match "Docker Compose version") {
+            Write-Host "Docker Compose verified: $composeResult" -ForegroundColor Green
+            return $true
+        }
+        else {
+            Write-Host "Warning: Docker Compose not found or not working properly" -ForegroundColor Yellow
+            Write-Host "Attempting to install Docker Compose standalone..." -ForegroundColor Cyan
+            
+            # Install standalone Docker Compose as fallback
+            $composeInstall = Invoke-SSHCommand "sudo curl -L 'https://github.com/docker/compose/releases/latest/download/docker-compose-`$(uname -s)-`$(uname -m)' -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose"
+            
+            if ($null -ne $composeInstall) {
+                $composeVerify = Invoke-SSHCommand "docker-compose --version"
+                if ($null -ne $composeVerify) {
+                    Write-Host "Docker Compose standalone installed successfully" -ForegroundColor Green
+                    return $true
+                }
+            }
+            
+            Write-Host "Docker installed but Docker Compose may not be available" -ForegroundColor Yellow
+            return $true
         }
     }
     catch {
