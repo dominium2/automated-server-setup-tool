@@ -116,12 +116,55 @@ function Test-WinRMConnection {
     try {
         Write-Host "Testing WinRM connection to $IP..." -ForegroundColor Cyan
         
+        # Check if WinRM service is running and start it if needed
+        Write-Host "  Checking WinRM service status..." -ForegroundColor Cyan
+        $winrmService = Get-Service -Name WinRM -ErrorAction SilentlyContinue
+        
+        if ($winrmService -and $winrmService.Status -ne 'Running') {
+            Write-Host "  Starting WinRM service..." -ForegroundColor Yellow
+            try {
+                Start-Service -Name WinRM -ErrorAction Stop
+                Write-Host "  WinRM service started" -ForegroundColor Green
+            }
+            catch {
+                Write-Host "  Warning: Could not start WinRM service: $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+        
+        # Check and configure TrustedHosts
+        Write-Host "  Checking TrustedHosts configuration..." -ForegroundColor Cyan
+        try {
+            $currentTrustedHosts = (Get-Item WSMan:\localhost\Client\TrustedHosts -ErrorAction Stop).Value
+            
+            if (-not $currentTrustedHosts.Contains($IP) -and $currentTrustedHosts -ne "*") {
+                Write-Host "  Adding $IP to TrustedHosts..." -ForegroundColor Yellow
+                
+                if ([string]::IsNullOrEmpty($currentTrustedHosts)) {
+                    Set-Item WSMan:\localhost\Client\TrustedHosts -Value $IP -Force
+                } else {
+                    Set-Item WSMan:\localhost\Client\TrustedHosts -Value "$currentTrustedHosts,$IP" -Force
+                }
+                Write-Host "  Successfully added $IP to TrustedHosts" -ForegroundColor Green
+            } else {
+                Write-Host "  $IP is already in TrustedHosts or using wildcard" -ForegroundColor Green
+            }
+        }
+        catch {
+            Write-Host "  Warning: Could not configure TrustedHosts: $($_.Exception.Message)" -ForegroundColor Yellow
+            Write-Host "  You may need to run PowerShell as Administrator" -ForegroundColor Yellow
+            Write-Host "  Or manually run: Set-Item WSMan:\localhost\Client\TrustedHosts -Value '$IP' -Force" -ForegroundColor Yellow
+        }
+        
         # Create credential object
         $winSecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
         $winCredential = New-Object System.Management.Automation.PSCredential ($User, $winSecurePassword)
         
+        # Create session options to skip certificate checks for non-domain scenarios
+        $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+        
         # Test WinRM connection
-        $winSession = New-PSSession -ComputerName $IP -Credential $winCredential -ErrorAction Stop
+        Write-Host "  Attempting to establish PSSession..." -ForegroundColor Cyan
+        $winSession = New-PSSession -ComputerName $IP -Credential $winCredential -SessionOption $sessionOption -ErrorAction Stop
         
         if ($winSession) {
             Write-Host "WinRM connection successful!" -ForegroundColor Green
@@ -139,6 +182,10 @@ function Test-WinRMConnection {
     }
     catch {
         Write-Host "WinRM connection failed: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Troubleshooting tips:" -ForegroundColor Yellow
+        Write-Host "  1. Run this script as Administrator" -ForegroundColor Yellow
+        Write-Host "  2. Enable WinRM on target: Enable-PSRemoting -Force" -ForegroundColor Yellow
+        Write-Host "  3. Configure firewall on target to allow WinRM (port 5985)" -ForegroundColor Yellow
         return $false
     }
 }
@@ -213,6 +260,8 @@ function Test-RemoteConnection {
         return $false
     }
 }
+
+
 
 # Export functions to make them available when module is imported
 Export-ModuleMember -Function Test-RemoteConnection, Test-SSHConnection, Test-WinRMConnection, Get-TargetOS
