@@ -43,17 +43,17 @@ Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
         
         <!-- Terminal Output Display -->
         <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="1" Background="#1E1E1E" Margin="0,0,0,5">
-            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
-                <RichTextBox Name="TerminalOutput" 
-                    IsReadOnly="True" 
-                    Background="#1E1E1E" 
-                    Foreground="White" 
-                    FontFamily="Consolas" 
-                    FontSize="12"
-                    Padding="5"
-                    BorderThickness="0"
-                    VerticalScrollBarVisibility="Auto"/>
-            </ScrollViewer>
+            <RichTextBox Name="TerminalOutput" 
+                IsReadOnly="True" 
+                Background="#1E1E1E" 
+                Foreground="White" 
+                FontFamily="Consolas" 
+                FontSize="12"
+                Padding="5"
+                BorderThickness="0"
+                VerticalScrollBarVisibility="Auto"
+                HorizontalScrollBarVisibility="Auto"
+                AcceptsReturn="True"/>
         </Border>
     </Grid>
 </Window>
@@ -65,43 +65,49 @@ $script:serverControls = @()  # Store references to all server controls
 
 # Function to write colored output to the terminal
 function Write-TerminalOutput {
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$false)]
         [AllowEmptyString()]
         [string]$Message,
         
-        [Parameter(Mandatory=$false)]
+        [Parameter(Position=1, Mandatory=$false)]
+        [ValidateSet("White", "Green", "Red", "Yellow", "Cyan", "Magenta", "Gray")]
         [string]$Color = "White"
     )
     
-    # Ensure message is treated as a single string
-    $messageText = [string]$Message
-    
-    # Create a new paragraph with no margin
-    $paragraph = New-Object System.Windows.Documents.Paragraph
-    $paragraph.Margin = New-Object System.Windows.Thickness(0)
-    $paragraph.LineHeight = 1
-    
-    # Create the text run
-    $run = New-Object System.Windows.Documents.Run
-    $run.Text = $messageText
-    
-    # Map color names to WPF colors
-    switch ($Color) {
-        "Green" { $run.Foreground = [System.Windows.Media.Brushes]::LimeGreen }
-        "Red" { $run.Foreground = [System.Windows.Media.Brushes]::Red }
-        "Yellow" { $run.Foreground = [System.Windows.Media.Brushes]::Yellow }
-        "Cyan" { $run.Foreground = [System.Windows.Media.Brushes]::Cyan }
-        "Magenta" { $run.Foreground = [System.Windows.Media.Brushes]::Magenta }
-        "Gray" { $run.Foreground = [System.Windows.Media.Brushes]::Gray }
-        default { $run.Foreground = [System.Windows.Media.Brushes]::White }
+    process {
+        # Convert to string explicitly and store as single value
+        $textToDisplay = [string]$Message
+        $colorToUse = [string]$Color
+        
+        $script:terminalOutput.Dispatcher.Invoke([action]{
+            # Create a new paragraph with no margin
+            $paragraph = New-Object System.Windows.Documents.Paragraph
+            $paragraph.Margin = New-Object System.Windows.Thickness(0)
+            
+            # Create the text run with the complete message using constructor
+            $run = New-Object System.Windows.Documents.Run($textToDisplay)
+            
+            # Map color names to WPF colors
+            $brush = switch ($colorToUse) {
+                "Green" { [System.Windows.Media.Brushes]::LimeGreen }
+                "Red" { [System.Windows.Media.Brushes]::Red }
+                "Yellow" { [System.Windows.Media.Brushes]::Yellow }
+                "Cyan" { [System.Windows.Media.Brushes]::Cyan }
+                "Magenta" { [System.Windows.Media.Brushes]::Magenta }
+                "Gray" { [System.Windows.Media.Brushes]::Gray }
+                default { [System.Windows.Media.Brushes]::White }
+            }
+            $run.Foreground = $brush
+            
+            $paragraph.Inlines.Add($run)
+            $script:terminalOutput.Document.Blocks.Add($paragraph)
+            
+            # Auto-scroll to bottom
+            $script:terminalOutput.ScrollToEnd()
+        }, "Normal")
     }
-    
-    $paragraph.Inlines.Add($run)
-    $script:terminalOutput.Document.Blocks.Add($paragraph)
-    
-    # Auto-scroll to bottom
-    $script:terminalOutput.ScrollToEnd()
 }
 
 # Function to create a new server box
