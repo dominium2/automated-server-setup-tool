@@ -12,14 +12,16 @@ Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     Title="Automated Home Lab Setup" 
-    Height="500" 
-    Width="800"
+    Height="700" 
+    Width="900"
     WindowStartupLocation="CenterScreen">
     
     <Grid Margin="10">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="2*"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="1*"/>
         </Grid.RowDefinitions>
         
         <!-- Top Button Bar -->
@@ -32,6 +34,27 @@ Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
         <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
             <StackPanel Name="ServerContainer" Orientation="Vertical"/>
         </ScrollViewer>
+        
+        <!-- Terminal Output Header -->
+        <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,5">
+            <Label Content="Terminal Output" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
+            <Button Name="ClearOutputButton" Content="Clear" Width="80" Height="25" Margin="10,0,0,0"/>
+        </StackPanel>
+        
+        <!-- Terminal Output Display -->
+        <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="1" Background="#1E1E1E" Margin="0,0,0,5">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto">
+                <RichTextBox Name="TerminalOutput" 
+                    IsReadOnly="True" 
+                    Background="#1E1E1E" 
+                    Foreground="White" 
+                    FontFamily="Consolas" 
+                    FontSize="12"
+                    Padding="5"
+                    BorderThickness="0"
+                    VerticalScrollBarVisibility="Auto"/>
+            </ScrollViewer>
+        </Border>
     </Grid>
 </Window>
 "@
@@ -39,6 +62,47 @@ Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
 # Initialize server counter and storage
 $script:serverCount = 0
 $script:serverControls = @()  # Store references to all server controls
+
+# Function to write colored output to the terminal
+function Write-TerminalOutput {
+    param(
+        [Parameter(Mandatory=$true)]
+        [AllowEmptyString()]
+        [string]$Message,
+        
+        [Parameter(Mandatory=$false)]
+        [string]$Color = "White"
+    )
+    
+    # Ensure message is treated as a single string
+    $messageText = [string]$Message
+    
+    # Create a new paragraph with no margin
+    $paragraph = New-Object System.Windows.Documents.Paragraph
+    $paragraph.Margin = New-Object System.Windows.Thickness(0)
+    $paragraph.LineHeight = 1
+    
+    # Create the text run
+    $run = New-Object System.Windows.Documents.Run
+    $run.Text = $messageText
+    
+    # Map color names to WPF colors
+    switch ($Color) {
+        "Green" { $run.Foreground = [System.Windows.Media.Brushes]::LimeGreen }
+        "Red" { $run.Foreground = [System.Windows.Media.Brushes]::Red }
+        "Yellow" { $run.Foreground = [System.Windows.Media.Brushes]::Yellow }
+        "Cyan" { $run.Foreground = [System.Windows.Media.Brushes]::Cyan }
+        "Magenta" { $run.Foreground = [System.Windows.Media.Brushes]::Magenta }
+        "Gray" { $run.Foreground = [System.Windows.Media.Brushes]::Gray }
+        default { $run.Foreground = [System.Windows.Media.Brushes]::White }
+    }
+    
+    $paragraph.Inlines.Add($run)
+    $script:terminalOutput.Document.Blocks.Add($paragraph)
+    
+    # Auto-scroll to bottom
+    $script:terminalOutput.ScrollToEnd()
+}
 
 # Function to create a new server box
 function Add-ServerBox {
@@ -265,12 +329,25 @@ $window = [Windows.Markup.XamlReader]::Load( $reader )
 $addServerButton = $window.FindName("AddServerButton")
 $runSetupButton = $window.FindName("RunSetupButton")
 $serverContainer = $window.FindName("ServerContainer")
+$clearOutputButton = $window.FindName("ClearOutputButton")
+$script:terminalOutput = $window.FindName("TerminalOutput")
 
 # Add first server box on startup
 Add-ServerBox
 
+# Welcome message in terminal
+Write-TerminalOutput -Message "Welcome to Automated Home Lab Setup" -Color "Cyan"
+Write-TerminalOutput -Message "Add servers and click 'Run Setup' to begin deployment." -Color "Gray"
+Write-TerminalOutput -Message "" -Color "White"
+
 $addServerButton.Add_Click({
     Add-ServerBox
+    Write-TerminalOutput -Message "Added Server $($script:serverCount)" -Color "Green"
+})
+
+$clearOutputButton.Add_Click({
+    $script:terminalOutput.Document.Blocks.Clear()
+    Write-TerminalOutput -Message "Terminal cleared." -Color "Gray"
 })
 
 $runSetupButton.Add_Click({
@@ -281,48 +358,61 @@ $runSetupButton.Add_Click({
     $validationErrors = Test-ServerConfigs -Configs $allServerConfigs
     
     if ($validationErrors.Count -gt 0) {
-        # Show validation errors in a message box
+        # Show validation errors in terminal and message box
+        Write-TerminalOutput -Message "" -Color "White"
+        Write-TerminalOutput -Message "========== Validation Errors ==========" -Color "Red"
+        foreach ($error in $validationErrors) {
+            Write-TerminalOutput -Message $error -Color "Red"
+        }
+        Write-TerminalOutput -Message "=======================================" -Color "Red"
+        Write-TerminalOutput -Message "" -Color "White"
+        
         $errorMessage = "Please fix the following errors:`n`n" + ($validationErrors -join "`n")
         [System.Windows.MessageBox]::Show($errorMessage, "Validation Error", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
         return
     }
     
-    # Display configurations (for testing)
-    Write-Host "`n========== Server Configurations ==========" -ForegroundColor Cyan
-    Write-Host "Total Servers: $($allServerConfigs.Count)`n" -ForegroundColor Green
+    # Display configurations in terminal
+    Write-TerminalOutput -Message "" -Color "White"
+    Write-TerminalOutput -Message "========== Server Configurations ==========" -Color "Cyan"
+    Write-TerminalOutput -Message "Total Servers: $($allServerConfigs.Count)" -Color "Green"
+    Write-TerminalOutput -Message "" -Color "White"
     
     foreach ($config in $allServerConfigs) {
-        Write-Host "Server $($config.ServerNumber):" -ForegroundColor Yellow
-        Write-Host "  IP Address: $($config.IP)"
-        Write-Host "  User: $($config.User)"
-        Write-Host "  Password: $('*' * $config.Password.Length)"
-        Write-Host "  Service: $($config.Service)"
-        Write-Host ""
+        Write-TerminalOutput -Message "Server $($config.ServerNumber):" -Color "Yellow"
+        Write-TerminalOutput -Message "  IP Address: $($config.IP)" -Color "White"
+        Write-TerminalOutput -Message "  User: $($config.User)" -Color "White"
+        Write-TerminalOutput -Message "  Password: $('*' * $config.Password.Length)" -Color "White"
+        Write-TerminalOutput -Message "  Service: $($config.Service)" -Color "White"
+        Write-TerminalOutput -Message "" -Color "White"
     }
     
-    Write-Host "==========================================" -ForegroundColor Cyan
-    Write-Host "Validation passed! Starting deployment...`n" -ForegroundColor Green
+    Write-TerminalOutput -Message "==========================================" -Color "Cyan"
+    Write-TerminalOutput -Message "Validation passed! Starting deployment..." -Color "Green"
+    Write-TerminalOutput -Message "" -Color "White"
     
     # Test connections and deploy services
     foreach ($config in $allServerConfigs) {
-        Write-Host "`n--- Processing Server $($config.ServerNumber) ---" -ForegroundColor Cyan
+        Write-TerminalOutput -Message "--- Processing Server $($config.ServerNumber) ---" -Color "Cyan"
         
         # Test connection to the server
         $connectionSuccess = Test-RemoteConnection -IP $config.IP -User $config.User -Password $config.Password
         
         if ($connectionSuccess) {
-            Write-Host "Successfully connected to $($config.IP)" -ForegroundColor Green
-            Write-Host "Deploying service: $($config.Service)" -ForegroundColor Yellow
+            Write-TerminalOutput -Message "Successfully connected to $($config.IP)" -Color "Green"
+            Write-TerminalOutput -Message "Deploying service: $($config.Service)" -Color "Yellow"
             
             # TODO: Add service deployment logic here
             # Example: Deploy-Service -Config $config
         }
         else {
-            Write-Host "Failed to connect to $($config.IP). Skipping..." -ForegroundColor Red
+            Write-TerminalOutput -Message "Failed to connect to $($config.IP). Skipping..." -Color "Red"
         }
+        Write-TerminalOutput -Message "" -Color "White"
     }
     
-    Write-Host "`n========== Deployment Complete ==========" -ForegroundColor Cyan
+    Write-TerminalOutput -Message "========== Deployment Complete ==========" -Color "Cyan"
+    Write-TerminalOutput -Message "" -Color "White"
     
     # TODO: Pass $allServerConfigs to your automation scripts
     # Example: Start-ServerSetup -Configs $allServerConfigs
