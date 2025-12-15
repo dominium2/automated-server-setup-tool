@@ -6,6 +6,10 @@ Add-Type -AssemblyName WindowsBase
 #Load modules
 Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
 
+# Load service modules
+Import-Module "$PSScriptRoot\modules\ServicesDebian\DockerSetupDebian.psm1" -Force
+Import-Module "$PSScriptRoot\modules\ServicesDebian\TraefikSetupDebian.psm1" -Force
+
 #Gui Design XML
 [xml]$xaml = @"
 <Window 
@@ -184,7 +188,7 @@ function Add-ServerBox {
     $serviceComboBox.Height = 25
     $serviceComboBox.Margin = "0,5"
     $serviceComboBox.Name = "ServiceField$($script:serverCount)"
-    @("AdGuard", "N8N", "Heimdall", "Crafty", "Portainer") | ForEach-Object {
+    @("AdGuard", "N8N", "Heimdall", "Crafty") | ForEach-Object {
         $item = New-Object System.Windows.Controls.ComboBoxItem
         $item.Content = $_
         [void]$serviceComboBox.Items.Add($item)
@@ -379,19 +383,81 @@ $runSetupButton.Add_Click({
     Write-TerminalOutput -Message "Validation passed! Starting deployment..." -Color "Green"
     Write-TerminalOutput -Message "" -Color "White"
     
+    # Track Traefik installation per server
+    $traefikInstalled = @{}
+    
     # Test connections and deploy services
     foreach ($config in $allServerConfigs) {
         Write-TerminalOutput -Message "--- Processing Server $($config.ServerNumber) ---" -Color "Cyan"
         
         # Test connection to the server
-        $connectionSuccess = Test-RemoteConnection -IP $config.IP -User $config.User -Password $config.Password
+        $connectionResult = Test-RemoteConnection -IP $config.IP -User $config.User -Password $config.Password
         
-        if ($connectionSuccess) {
+        if ($connectionResult) {
             Write-TerminalOutput -Message "Successfully connected to $($config.IP)" -Color "Green"
-            Write-TerminalOutput -Message "Deploying service: $($config.Service)" -Color "Yellow"
             
-            # TODO: Add service deployment logic here
-            # Example: Deploy-Service -Config $config
+            # Get the OS type
+            $osType = Get-TargetOS -IP $config.IP
+            Write-TerminalOutput -Message "Detected OS: $osType" -Color "Cyan"
+            
+            # Deploy service based on OS
+            if ($osType -eq "Linux") {
+                Write-TerminalOutput -Message "Deploying on Linux system..." -Color "Yellow"
+                
+                # Install Docker first (required for all services)
+                Write-TerminalOutput -Message "Ensuring Docker is installed..." -Color "Cyan"
+                $dockerInstalled = Install-Docker -IP $config.IP -User $config.User -Password $config.Password
+                
+                if (-not $dockerInstalled) {
+                    Write-TerminalOutput -Message "Failed to install Docker. Skipping service deployment." -Color "Red"
+                    continue
+                }
+                
+                # Install Traefik (once per server)
+                if (-not $traefikInstalled.ContainsKey($config.IP)) {
+                    Write-TerminalOutput -Message "Installing Traefik reverse proxy..." -Color "Cyan"
+                    $traefikSuccess = Install-Traefik -IP $config.IP -User $config.User -Password $config.Password
+                    
+                    if ($traefikSuccess) {
+                        $traefikInstalled[$config.IP] = $true
+                        Write-TerminalOutput -Message "Traefik installed successfully" -Color "Green"
+                    }
+                    else {
+                        Write-TerminalOutput -Message "Warning: Traefik installation failed, services will use direct ports" -Color "Yellow"
+                        $traefikInstalled[$config.IP] = $false
+                    }
+                }
+                else {
+                    Write-TerminalOutput -Message "Traefik already installed on this server" -Color "Gray"
+                }
+                
+                # Deploy the selected service
+                Write-TerminalOutput -Message "Deploying service: $($config.Service)" -Color "Yellow"
+                
+                switch ($config.Service) {
+                    "AdGuard" {
+                        Write-TerminalOutput -Message "AdGuard deployment not yet implemented" -Color "Yellow"
+                    }
+                    "N8N" {
+                        Write-TerminalOutput -Message "N8N deployment not yet implemented" -Color "Yellow"
+                    }
+                    "Heimdall" {
+                        Write-TerminalOutput -Message "Heimdall deployment not yet implemented" -Color "Yellow"
+                    }
+                    "Crafty" {
+                        Write-TerminalOutput -Message "Crafty deployment not yet implemented" -Color "Yellow"
+                    }
+                    default {
+                        Write-TerminalOutput -Message "Unknown service: $($config.Service)" -Color "Red"
+                    }
+                }
+            }
+            elseif ($osType -eq "Windows") {
+                Write-TerminalOutput -Message "Windows deployment not yet implemented" -Color "Yellow"
+            }
+            else {
+                Write-TerminalOutput -Message "Unable to detect OS type. Skipping deployment." -Color "Red"
+            }
         }
         else {
             Write-TerminalOutput -Message "Failed to connect to $($config.IP). Skipping..." -Color "Red"

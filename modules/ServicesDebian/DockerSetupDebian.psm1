@@ -86,17 +86,24 @@ function Install-Docker {
             return $false
         }
         
-        # Add Docker's official GPG key
+        # Add Docker's official GPG key (using tee method to avoid GPG interactive issues)
         Write-Host "  Adding Docker GPG key..." -ForegroundColor Cyan
-        $gpgResult = Invoke-SSHCommand "sudo mkdir -p /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/debian/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg"
+        $gpgResult = Invoke-SSHCommand "sudo mkdir -p /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/debian/gpg | sudo tee /etc/apt/keyrings/docker.asc"
         if ($null -eq $gpgResult) {
             Write-Host "Failed to add Docker GPG key" -ForegroundColor Red
             return $false
         }
+        Write-Host "  GPG key added successfully" -ForegroundColor Green
+        
+        # Set proper permissions on the key file
+        $chmodResult = Invoke-SSHCommand "sudo chmod a+r /etc/apt/keyrings/docker.asc"
+        if ($null -eq $chmodResult) {
+            Write-Host "Warning: Failed to set permissions on Docker GPG key" -ForegroundColor Yellow
+        }
         
         # Set up Docker repository
         Write-Host "  Setting up Docker repository..." -ForegroundColor Cyan
-        $repoResult = Invoke-SSHCommand "echo 'deb [arch=`$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian `$(lsb_release -cs) stable' | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null"
+        $repoResult = Invoke-SSHCommand "echo 'deb [arch=`$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian `$(lsb_release -cs) stable' | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null"
         if ($null -eq $repoResult) {
             Write-Host "Failed to set up Docker repository" -ForegroundColor Red
             return $false
