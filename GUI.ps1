@@ -65,49 +65,31 @@ $script:serverControls = @()  # Store references to all server controls
 
 # Function to write colored output to the terminal
 function Write-TerminalOutput {
-    [CmdletBinding()]
     param(
-        [Parameter(Position=0, Mandatory=$true, ValueFromPipeline=$false)]
-        [AllowEmptyString()]
         [string]$Message,
-        
-        [Parameter(Position=1, Mandatory=$false)]
-        [ValidateSet("White", "Green", "Red", "Yellow", "Cyan", "Magenta", "Gray")]
         [string]$Color = "White"
     )
     
-    process {
-        # Convert to string explicitly and store as single value
-        $textToDisplay = [string]$Message
-        $colorToUse = [string]$Color
+    $script:terminalOutput.Dispatcher.Invoke([action]{
+        $paragraph = New-Object System.Windows.Documents.Paragraph
+        $paragraph.Margin = New-Object System.Windows.Thickness(0)
         
-        $script:terminalOutput.Dispatcher.Invoke([action]{
-            # Create a new paragraph with no margin
-            $paragraph = New-Object System.Windows.Documents.Paragraph
-            $paragraph.Margin = New-Object System.Windows.Thickness(0)
-            
-            # Create the text run with the complete message using constructor
-            $run = New-Object System.Windows.Documents.Run($textToDisplay)
-            
-            # Map color names to WPF colors
-            $brush = switch ($colorToUse) {
-                "Green" { [System.Windows.Media.Brushes]::LimeGreen }
-                "Red" { [System.Windows.Media.Brushes]::Red }
-                "Yellow" { [System.Windows.Media.Brushes]::Yellow }
-                "Cyan" { [System.Windows.Media.Brushes]::Cyan }
-                "Magenta" { [System.Windows.Media.Brushes]::Magenta }
-                "Gray" { [System.Windows.Media.Brushes]::Gray }
-                default { [System.Windows.Media.Brushes]::White }
-            }
-            $run.Foreground = $brush
-            
-            $paragraph.Inlines.Add($run)
-            $script:terminalOutput.Document.Blocks.Add($paragraph)
-            
-            # Auto-scroll to bottom
-            $script:terminalOutput.ScrollToEnd()
-        }, "Normal")
-    }
+        $run = New-Object System.Windows.Documents.Run($Message)
+        
+        switch ($Color) {
+            "Green" { $run.Foreground = [System.Windows.Media.Brushes]::LimeGreen }
+            "Red" { $run.Foreground = [System.Windows.Media.Brushes]::Red }
+            "Yellow" { $run.Foreground = [System.Windows.Media.Brushes]::Yellow }
+            "Cyan" { $run.Foreground = [System.Windows.Media.Brushes]::Cyan }
+            "Magenta" { $run.Foreground = [System.Windows.Media.Brushes]::Magenta }
+            "Gray" { $run.Foreground = [System.Windows.Media.Brushes]::Gray }
+            default { $run.Foreground = [System.Windows.Media.Brushes]::White }
+        }
+        
+        $paragraph.Inlines.Add($run)
+        $script:terminalOutput.Document.Blocks.Add($paragraph)
+        $script:terminalOutput.ScrollToEnd()
+    }, "Normal")
 }
 
 # Function to create a new server box
