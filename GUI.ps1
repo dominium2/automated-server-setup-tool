@@ -349,8 +349,8 @@ $runSetupButton.Add_Click({
         # Show validation errors in terminal and message box
         Write-TerminalOutput -Message "" -Color "White"
         Write-TerminalOutput -Message "========== Validation Errors ==========" -Color "Red"
-        foreach ($error in $validationErrors) {
-            Write-TerminalOutput -Message $error -Color "Red"
+        foreach ($validationError in $validationErrors) {
+            Write-TerminalOutput -Message $validationError -Color "Red"
         }
         Write-TerminalOutput -Message "=======================================" -Color "Red"
         Write-TerminalOutput -Message "" -Color "White"
