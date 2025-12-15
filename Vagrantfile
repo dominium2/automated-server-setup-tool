@@ -50,7 +50,7 @@ Vagrant.configure("2") do |config|
   # Define 2 Windows test servers
   (1..2).each do |i|
     config.vm.define "windows#{i}" do |server|
-      server.vm.box = "gusztavvargadr/windows-server-2022-standard"
+      server.vm.box = "gusztavvargadr/windows-10"
       server.vm.hostname = "windows#{i}"
       server.vm.network "private_network", ip: "192.168.56.#{20+i}"
       
