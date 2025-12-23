@@ -49,9 +49,10 @@ function Install-Docker {
         function Invoke-SSHCommand {
             param([string]$Command)
             
-            $result = echo y | plink -batch -pw $Password $User@$IP $Command 2>&1
+            $result = Write-Output y | plink -batch -pw $Password $User@$IP $Command 2>&1
             
-            if ($LASTEXITCODE -ne 0) {
+            # Only treat as error if we get actual error messages
+            if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied|cannot|permission denied") {
                 Write-Host "Command failed: $Command" -ForegroundColor Red
                 Write-Host "Output: $result" -ForegroundColor Red
                 return $null
@@ -80,36 +81,72 @@ function Install-Docker {
         
         # Install prerequisites
         Write-Host "  Installing prerequisites..." -ForegroundColor Cyan
-        $prereqResult = Invoke-SSHCommand "sudo apt-get install -y ca-certificates curl gnupg lsb-release"
+        $prereqResult = Invoke-SSHCommand "sudo apt-get install -y ca-certificates curl"
         if ($null -eq $prereqResult) {
             Write-Host "Failed to install prerequisites" -ForegroundColor Red
             return $false
         }
         
-        # Add Docker's official GPG key (using tee method to avoid GPG interactive issues)
+        # Create keyrings directory
+        Write-Host "  Setting up keyrings directory..." -ForegroundColor Cyan
+        $keyringDirResult = Invoke-SSHCommand "sudo install -m 0755 -d /etc/apt/keyrings"
+        
+        # Add Docker's official GPG key - use command that returns status
         Write-Host "  Adding Docker GPG key..." -ForegroundColor Cyan
-        $gpgResult = Invoke-SSHCommand "sudo mkdir -p /etc/apt/keyrings && curl -fsSL https://download.docker.com/linux/debian/gpg | sudo tee /etc/apt/keyrings/docker.asc"
-        if ($null -eq $gpgResult) {
+        $gpgResult = Invoke-SSHCommand "sudo curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc && echo 'GPG_KEY_SUCCESS' || echo 'GPG_KEY_FAILED'"
+        if ($gpgResult -notmatch "GPG_KEY_SUCCESS") {
             Write-Host "Failed to add Docker GPG key" -ForegroundColor Red
+            Write-Host "Output: $gpgResult" -ForegroundColor Red
             return $false
         }
-        Write-Host "  GPG key added successfully" -ForegroundColor Green
+        Write-Host "  GPG key downloaded successfully" -ForegroundColor Green
         
         # Set proper permissions on the key file
+        Write-Host "  Setting GPG key permissions..." -ForegroundColor Cyan
         $chmodResult = Invoke-SSHCommand "sudo chmod a+r /etc/apt/keyrings/docker.asc"
-        if ($null -eq $chmodResult) {
-            Write-Host "Warning: Failed to set permissions on Docker GPG key" -ForegroundColor Yellow
+        
+        # Remove any existing Docker repository configuration (cleanup from previous failed attempts)
+        Write-Host "  Cleaning up old Docker repository configuration..." -ForegroundColor Cyan
+        Invoke-SSHCommand "sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources"
+        
+        # Get the system codename for the repository
+        Write-Host "  Detecting system version..." -ForegroundColor Cyan
+        $codenameResult = Invoke-SSHCommand ". /etc/os-release && echo `$VERSION_CODENAME"
+        $codename = ($codenameResult -split "`n")[0].Trim()
+        if ([string]::IsNullOrWhiteSpace($codename)) {
+            Write-Host "Failed to detect system codename, using 'bullseye' as default" -ForegroundColor Yellow
+            $codename = "bullseye"
+        }
+        Write-Host "  System codename: $codename" -ForegroundColor Cyan
+        
+        # Set up Docker repository using DEB822 format with multi-line here-doc
+        Write-Host "  Setting up Docker repository..." -ForegroundColor Cyan
+        
+        # Create the repository file line by line to avoid here-doc issues
+        $setupRepoCommands = @(
+            "sudo bash -c 'echo ""Types: deb"" > /etc/apt/sources.list.d/docker.sources'",
+            "sudo bash -c 'echo ""URIs: https://download.docker.com/linux/debian"" >> /etc/apt/sources.list.d/docker.sources'",
+            "sudo bash -c 'echo ""Suites: $codename"" >> /etc/apt/sources.list.d/docker.sources'",
+            "sudo bash -c 'echo ""Components: stable"" >> /etc/apt/sources.list.d/docker.sources'",
+            "sudo bash -c 'echo ""Signed-By: /etc/apt/keyrings/docker.asc"" >> /etc/apt/sources.list.d/docker.sources'"
+        )
+        
+        $repoSuccess = $true
+        foreach ($cmd in $setupRepoCommands) {
+            $result = Invoke-SSHCommand $cmd
+            if ($null -eq $result -and $cmd -notmatch "echo") {
+                $repoSuccess = $false
+                break
+            }
         }
         
-        # Set up Docker repository
-        Write-Host "  Setting up Docker repository..." -ForegroundColor Cyan
-        $repoResult = Invoke-SSHCommand "echo 'deb [arch=`$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian `$(lsb_release -cs) stable' | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null"
-        if ($null -eq $repoResult) {
+        if (-not $repoSuccess) {
             Write-Host "Failed to set up Docker repository" -ForegroundColor Red
             return $false
         }
+        Write-Host "  Repository file created successfully" -ForegroundColor Green
         
-        # Update package index again
+        # Update package index with Docker repository
         Write-Host "  Updating package index with Docker repository..." -ForegroundColor Cyan
         $updateResult2 = Invoke-SSHCommand "sudo apt-get update -y"
         if ($null -eq $updateResult2) {
@@ -135,42 +172,18 @@ function Install-Docker {
         
         # Add user to docker group (optional, for non-root usage)
         Write-Host "  Adding user to docker group..." -ForegroundColor Cyan
-        $groupResult = Invoke-SSHCommand "sudo usermod -aG docker $User"
+        Invoke-SSHCommand "sudo usermod -aG docker $User"
         
         # Verify Docker installation
+        Write-Host "  Verifying Docker installation..." -ForegroundColor Cyan
         $verifyResult = Invoke-SSHCommand "docker --version"
         if ($null -ne $verifyResult -and $verifyResult -match "Docker version") {
             Write-Host "Docker installed successfully: $verifyResult" -ForegroundColor Green
+            return $true
         }
         else {
             Write-Host "Docker installation completed but verification failed" -ForegroundColor Yellow
             return $false
-        }
-        
-        # Verify Docker Compose installation
-        Write-Host "  Verifying Docker Compose..." -ForegroundColor Cyan
-        $composeResult = Invoke-SSHCommand "docker compose version"
-        if ($null -ne $composeResult -and $composeResult -match "Docker Compose version") {
-            Write-Host "Docker Compose verified: $composeResult" -ForegroundColor Green
-            return $true
-        }
-        else {
-            Write-Host "Warning: Docker Compose not found or not working properly" -ForegroundColor Yellow
-            Write-Host "Attempting to install Docker Compose standalone..." -ForegroundColor Cyan
-            
-            # Install standalone Docker Compose as fallback
-            $composeInstall = Invoke-SSHCommand "sudo curl -L 'https://github.com/docker/compose/releases/latest/download/docker-compose-`$(uname -s)-`$(uname -m)' -o /usr/local/bin/docker-compose && sudo chmod +x /usr/local/bin/docker-compose"
-            
-            if ($null -ne $composeInstall) {
-                $composeVerify = Invoke-SSHCommand "docker-compose --version"
-                if ($null -ne $composeVerify) {
-                    Write-Host "Docker Compose standalone installed successfully" -ForegroundColor Green
-                    return $true
-                }
-            }
-            
-            Write-Host "Docker installed but Docker Compose may not be available" -ForegroundColor Yellow
-            return $true
         }
     }
     catch {

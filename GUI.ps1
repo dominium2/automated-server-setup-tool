@@ -467,9 +467,6 @@ $runSetupButton.Add_Click({
     
     Write-TerminalOutput -Message "========== Deployment Complete ==========" -Color "Cyan"
     Write-TerminalOutput -Message "" -Color "White"
-    
-    # TODO: Pass $allServerConfigs to your automation scripts
-    # Example: Start-ServerSetup -Configs $allServerConfigs
 })
 
 #Show the Window
