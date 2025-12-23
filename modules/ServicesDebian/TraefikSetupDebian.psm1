@@ -74,9 +74,10 @@ function Install-Traefik {
         function Invoke-SSHCommand {
             param([string]$Command)
             
-            $result = echo y | plink -batch -pw $Password $User@$IP $Command 2>&1
+            $result = Write-Output y | plink -batch -pw $Password $User@$IP $Command 2>&1
             
-            if ($LASTEXITCODE -ne 0) {
+            # Check if the result indicates a real error (not just empty output)
+            if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied") {
                 Write-Host "Command failed: $Command" -ForegroundColor Red
                 Write-Host "Output: $result" -ForegroundColor Red
                 return $null
@@ -85,24 +86,24 @@ function Install-Traefik {
             return $result
         }
         
+        # Create Traefik directory structure first
+        Write-Host "Creating Traefik directory structure..." -ForegroundColor Cyan
+        Invoke-SSHCommand "mkdir -p /home/$User/traefik/letsencrypt" | Out-Null
+        
         # Check if Traefik is already running
         Write-Host "Checking for existing Traefik installation..." -ForegroundColor Cyan
-        $traefikCheck = Invoke-SSHCommand "sudo docker ps -a --filter name=traefik --format '{{.Names}}'"
+        $traefikCheck = Invoke-SSHCommand "sudo docker ps -a --filter name=traefik --format '{{.Names}}' 2>/dev/null"
         
         if ($traefikCheck -match "traefik") {
-            Write-Host "Traefik container already exists. Removing old container..." -ForegroundColor Yellow
-            $removeResult = Invoke-SSHCommand "sudo docker rm -f traefik"
-            if ($null -eq $removeResult) {
-                Write-Host "Warning: Failed to remove old Traefik container" -ForegroundColor Yellow
+            Write-Host "Traefik container already exists. Stopping and removing..." -ForegroundColor Yellow
+            # Check if docker-compose.yml exists
+            $composeExists = Invoke-SSHCommand "test -f /home/$User/traefik/docker-compose.yml && echo 'exists' || echo 'not found'"
+            
+            if ($composeExists -match "exists") {
+                Invoke-SSHCommand "cd /home/$User/traefik && sudo docker compose down" | Out-Null
+            } else {
+                Invoke-SSHCommand "sudo docker rm -f traefik" | Out-Null
             }
-        }
-        
-        # Create Traefik directory structure
-        Write-Host "Creating Traefik directory structure..." -ForegroundColor Cyan
-        $dirResult = Invoke-SSHCommand "mkdir -p /home/$User/traefik/config"
-        if ($null -eq $dirResult) {
-            Write-Host "Failed to create Traefik directories" -ForegroundColor Red
-            return $false
         }
         
         # Create traefik.yml configuration file
@@ -144,22 +145,47 @@ log:
   level: INFO
 "@
         
-        $configResult = Invoke-SSHCommand "cat > /home/$User/traefik/traefik.yml << 'EOF'`n$traefikConfig`nEOF"
-        if ($null -eq $configResult) {
-            Write-Host "Failed to create Traefik configuration" -ForegroundColor Red
-            return $false
-        }
+        # Write config using echo to avoid heredoc issues
+        $escapedConfig = $traefikConfig -replace "'", "'\\''"
+        Invoke-SSHCommand "echo '$escapedConfig' > /home/$User/traefik/traefik.yml" | Out-Null
+        
+        # Create Docker Compose file
+        Write-Host "Creating Docker Compose configuration..." -ForegroundColor Cyan
+        $dockerComposeConfig = @"
+version: '3.8'
+
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: always
+    ports:
+      - '80:80'
+      - '443:443'
+      - '8080:8080'
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/traefik.yml:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - traefik-network
+
+networks:
+  traefik-network:
+    external: true
+"@
+        
+        # Write compose file using echo to avoid heredoc issues
+        $escapedCompose = $dockerComposeConfig -replace "'", "'\\''"
+        Invoke-SSHCommand "echo '$escapedCompose' > /home/$User/traefik/docker-compose.yml" | Out-Null
         
         # Create docker network for Traefik
         Write-Host "Creating Docker network for Traefik..." -ForegroundColor Cyan
         $networkCheck = Invoke-SSHCommand "sudo docker network ls --filter name=traefik-network --format '{{.Name}}'"
         
         if ($networkCheck -notmatch "traefik-network") {
-            $networkResult = Invoke-SSHCommand "sudo docker network create traefik-network"
-            if ($null -eq $networkResult) {
-                Write-Host "Failed to create Traefik network" -ForegroundColor Red
-                return $false
-            }
+            Invoke-SSHCommand "sudo docker network create traefik-network" | Out-Null
+            Write-Host "Traefik network created" -ForegroundColor Gray
         }
         else {
             Write-Host "Traefik network already exists" -ForegroundColor Gray
@@ -167,37 +193,18 @@ log:
         
         # Create acme.json file with correct permissions
         Write-Host "Creating SSL certificate storage..." -ForegroundColor Cyan
-        $acmeResult = Invoke-SSHCommand "mkdir -p /home/$User/traefik/letsencrypt && touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json"
-        if ($null -eq $acmeResult) {
-            Write-Host "Failed to create acme.json file" -ForegroundColor Red
-            return $false
-        }
+        Invoke-SSHCommand "touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json" | Out-Null
         
-        # Deploy Traefik container
-        Write-Host "Deploying Traefik container..." -ForegroundColor Cyan
-        $traefikCommand = @"
-sudo docker run -d \
-  --name=traefik \
-  --restart=always \
-  -p 80:80 \
-  -p 443:443 \
-  -p 8080:8080 \
-  -v /var/run/docker.sock:/var/run/docker.sock:ro \
-  -v /home/$User/traefik/traefik.yml:/traefik.yml:ro \
-  -v /home/$User/traefik/letsencrypt:/letsencrypt \
-  --network traefik-network \
-  traefik:latest
-"@
+        # Deploy Traefik using Docker Compose
+        Write-Host "Deploying Traefik with Docker Compose..." -ForegroundColor Cyan
+        $deployOutput = Invoke-SSHCommand "cd /home/$User/traefik && sudo docker compose up -d 2>&1"
         
-        $traefikInstall = Invoke-SSHCommand $traefikCommand
-        
-        if ($null -eq $traefikInstall) {
-            Write-Host "Failed to deploy Traefik" -ForegroundColor Red
-            return $false
+        if ($deployOutput) {
+            Write-Host "Deploy output: $deployOutput" -ForegroundColor Gray
         }
         
         # Verify Traefik is running
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 5
         $verifyResult = Invoke-SSHCommand "sudo docker ps --filter name=traefik --format '{{.Status}}'"
         
         if ($verifyResult -match "Up") {
@@ -209,7 +216,19 @@ sudo docker run -d \
             return $true
         }
         else {
-            Write-Host "Traefik container deployed but not running properly" -ForegroundColor Yellow
+            Write-Host "Traefik container not running" -ForegroundColor Red
+            Write-Host "Checking all containers..." -ForegroundColor Yellow
+            $allContainers = Invoke-SSHCommand "sudo docker ps -a"
+            Write-Host $allContainers -ForegroundColor Gray
+            
+            # Check if container exists but stopped
+            $stoppedTraefik = Invoke-SSHCommand "sudo docker ps -a --filter name=traefik --format '{{.Names}} - {{.Status}}'"
+            if ($stoppedTraefik) {
+                Write-Host "`nTraefik container status: $stoppedTraefik" -ForegroundColor Yellow
+                Write-Host "Checking logs..." -ForegroundColor Yellow
+                $logs = Invoke-SSHCommand "sudo docker logs traefik 2>&1"
+                Write-Host $logs -ForegroundColor Gray
+            }
             return $false
         }
     }
