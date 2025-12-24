@@ -16,10 +16,14 @@ function Install-Portainer {
     .PARAMETER Password
         The password for SSH authentication.
 
+    .PARAMETER Domain
+        Base domain for Traefik routing (e.g., "example.com"). Portainer will be accessible at portainer.example.com
+
     .EXAMPLE
-        Install-Portainer -IP "192.168.1.100" -User "admin" -Password "password123"
+        Install-Portainer -IP "192.168.1.100" -User "admin" -Password "password123" -Domain "homelab.local"
 
     .NOTES
+        Requires Traefik to be installed first for reverse proxy functionality.
         Requires plink (PuTTY) to be installed for SSH connectivity.
         Connection should already be validated before calling this function.
         Docker must be installed before running this function.
@@ -33,7 +37,10 @@ function Install-Portainer {
         [string]$User,
         
         [Parameter(Mandatory=$true)]
-        [string]$Password
+        [string]$Password,
+
+        [Parameter(Mandatory=$false)]
+        [string]$Domain = "localhost"
     )
 
     try {
@@ -91,35 +98,44 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - portainer_data:/data
-    ports:
-      - 9443:9443
-      - 8000:8000
+    expose:
+      - 9443
+      - 8000
+    networks:
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host(\`portainer.$Domain\`)"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9443"
+      - "traefik.http.services.portainer.loadbalancer.server.scheme=https"
 
 volumes:
   portainer_data:
     name: portainer_data
 
 networks:
-  default:
-    name: portainer_network
+  traefik-network:
+    external: true
 "@
         
         # Write compose file using base64 encoding to preserve formatting
         $dockerComposeConfig | Out-File -FilePath "$env:TEMP\docker-compose.yml" -Encoding UTF8 -NoNewline
         $composeContent = Get-Content "$env:TEMP\docker-compose.yml" -Raw
         $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($composeContent))
-        Invoke-SSHCommand "echo '$composeBase64' | base64 -d > /home/$User/portainer/docker-compose.yml" | Out-Null
-        Remove-Item "$env:TEMP\docker-compose.yml" -ErrorAction SilentlyContinue
+        # Verify Traefik network exists
+        Write-Host "Verifying Traefik network..." -ForegroundColor Cyan
+        $networkCheck = Invoke-SSHCommand "sudo docker network ls --filter name=traefik-network --format '{{.Name}}' 2>/dev/null"
         
-        # Create docker network for Portainer
-        Write-Host "Creating Docker network for Portainer..." -ForegroundColor Cyan
-        $createNetwork = Invoke-SSHCommand "sudo docker network create portainer_network 2>&1 || true"
-        
-        if ($createNetwork -match "already exists") {
-            Write-Host "Portainer network already exists" -ForegroundColor Gray
-        }
-        elseif ($createNetwork -match "portainer_network") {
-            Write-Host "Portainer network created" -ForegroundColor Gray
+        if (-not ($networkCheck -match "traefik-network")) {
+            Write-Host "Warning: Traefik network not found. Creating it..." -ForegroundColor Yellow
+            $createNetwork = Invoke-SSHCommand "sudo docker network create traefik-network 2>&1 || true"
+            if ($createNetwork -match "traefik-network|already exists") {
+                Write-Host "Traefik network ready" -ForegroundColor Gray
+            }
+        } else {
+            Write-Host "Traefik network exists" -ForegroundColor Gray
         }
         else {
             Write-Host "Network creation output: $createNetwork" -ForegroundColor Gray
@@ -139,9 +155,10 @@ networks:
         
         if ($verifyResult -match "Up") {
             Write-Host "`nPortainer installed successfully!" -ForegroundColor Green
-            Write-Host "Portainer Web UI: https://$IP:9443" -ForegroundColor Cyan
-            Write-Host "Edge Agent Port: http://$IP:8000" -ForegroundColor Cyan
+            Write-Host "Portainer Web UI: https://portainer.$Domain" -ForegroundColor Cyan
+            Write-Host "Direct Access (if needed): https://$IP:9443" -ForegroundColor Gray
             Write-Host "`nNote: You will need to create an admin account on first login" -ForegroundColor Yellow
+            Write-Host "Note: Ensure DNS points portainer.$Domain to $IP" -ForegroundColor Yellow
             return $true
         }
         else {
