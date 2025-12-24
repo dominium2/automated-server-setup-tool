@@ -51,18 +51,6 @@ function Install-Traefik {
     try {
         Write-Host "`nStarting Traefik installation on $IP..." -ForegroundColor Cyan
         
-        # Import Docker module
-        $dockerModulePath = Join-Path $PSScriptRoot "DockerSetupDebian.psm1"
-        Import-Module $dockerModulePath -Force
-        
-        # Ensure Docker is installed
-        $dockerInstalled = Install-Docker -IP $IP -User $User -Password $Password
-        
-        if (-not $dockerInstalled) {
-            Write-Host "Cannot install Traefik without Docker" -ForegroundColor Red
-            return $false
-        }
-        
         # Check if plink is available
         if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
             Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
@@ -76,7 +64,6 @@ function Install-Traefik {
             
             $result = Write-Output y | plink -batch -pw $Password $User@$IP $Command 2>&1
             
-            # Check if the result indicates a real error (not just empty output)
             if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied") {
                 Write-Host "Command failed: $Command" -ForegroundColor Red
                 Write-Host "Output: $result" -ForegroundColor Red
@@ -86,18 +73,17 @@ function Install-Traefik {
             return $result
         }
         
-        # Create Traefik directory structure first
+        # Create Traefik directory structure
         Write-Host "Creating Traefik directory structure..." -ForegroundColor Cyan
         Invoke-SSHCommand "mkdir -p /home/$User/traefik/letsencrypt" | Out-Null
         
-        # Check if Traefik is already running
+        # Check and cleanup existing Traefik installation
         Write-Host "Checking for existing Traefik installation..." -ForegroundColor Cyan
         $traefikCheck = Invoke-SSHCommand "sudo docker ps -a --filter name=traefik --format '{{.Names}}' 2>/dev/null"
         
         if ($traefikCheck -match "traefik") {
-            Write-Host "Traefik container already exists. Stopping and removing..." -ForegroundColor Yellow
-            # Check if docker-compose.yml exists
-            $composeExists = Invoke-SSHCommand "test -f /home/$User/traefik/docker-compose.yml && echo 'exists' || echo 'not found'"
+            Write-Host "Removing existing Traefik container..." -ForegroundColor Yellow
+            $composeExists = Invoke-SSHCommand "test -f /home/$User/traefik/docker-compose.yml && echo 'exists'"
             
             if ($composeExists -match "exists") {
                 Invoke-SSHCommand "cd /home/$User/traefik && sudo docker compose down" | Out-Null
@@ -222,17 +208,10 @@ networks:
             return $true
         }
         else {
-            Write-Host "Traefik container not running" -ForegroundColor Red
-            Write-Host "Checking all containers..." -ForegroundColor Yellow
-            $allContainers = Invoke-SSHCommand "sudo docker ps -a"
-            Write-Host $allContainers -ForegroundColor Gray
-            
-            # Check if container exists but stopped
-            $stoppedTraefik = Invoke-SSHCommand "sudo docker ps -a --filter name=traefik --format '{{.Names}} - {{.Status}}'"
-            if ($stoppedTraefik) {
-                Write-Host "`nTraefik container status: $stoppedTraefik" -ForegroundColor Yellow
-                Write-Host "Checking logs..." -ForegroundColor Yellow
-                $logs = Invoke-SSHCommand "sudo docker logs traefik 2>&1"
+            Write-Host "Traefik deployment failed" -ForegroundColor Red
+            $logs = Invoke-SSHCommand "sudo docker logs traefik 2>&1"
+            if ($logs) {
+                Write-Host "Container logs:" -ForegroundColor Yellow
                 Write-Host $logs -ForegroundColor Gray
             }
             return $false
