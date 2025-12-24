@@ -9,6 +9,7 @@ Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
 # Load service modules
 Import-Module "$PSScriptRoot\modules\ServicesDebian\DockerSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\TraefikSetupDebian.psm1" -Force
+Import-Module "$PSScriptRoot\modules\ServicesDebian\PortainerSetupDebian.psm1" -Force
 
 #Gui Design XML
 [xml]$xaml = @"
@@ -188,7 +189,7 @@ function Add-ServerBox {
     $serviceComboBox.Height = 25
     $serviceComboBox.Margin = "0,5"
     $serviceComboBox.Name = "ServiceField$($script:serverCount)"
-    @("AdGuard", "N8N", "Heimdall", "Crafty") | ForEach-Object {
+    @("Portainer", "AdGuard", "N8N", "Heimdall", "Crafty") | ForEach-Object {
         $item = New-Object System.Windows.Controls.ComboBoxItem
         $item.Content = $_
         [void]$serviceComboBox.Items.Add($item)
@@ -435,6 +436,15 @@ $runSetupButton.Add_Click({
                 Write-TerminalOutput -Message "Deploying service: $($config.Service)" -Color "Yellow"
                 
                 switch ($config.Service) {
+                    "Portainer" {
+                        $portainerSuccess = Install-Portainer -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($portainerSuccess) {
+                            Write-TerminalOutput -Message "Portainer deployed successfully" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "Portainer deployment failed" -Color "Red"
+                        }
+                    }
                     "AdGuard" {
                         Write-TerminalOutput -Message "AdGuard deployment not yet implemented" -Color "Yellow"
                     }
