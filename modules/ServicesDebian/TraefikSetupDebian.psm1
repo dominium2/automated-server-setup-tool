@@ -145,24 +145,25 @@ log:
   level: INFO
 "@
         
-        # Write config using echo to avoid heredoc issues
-        $escapedConfig = $traefikConfig -replace "'", "'\\''"
-        Invoke-SSHCommand "echo '$escapedConfig' > /home/$User/traefik/traefik.yml" | Out-Null
+        # Write config file using tee command
+        $traefikConfig | Out-File -FilePath "$env:TEMP\traefik.yml" -Encoding UTF8 -NoNewline
+        $configContent = Get-Content "$env:TEMP\traefik.yml" -Raw
+        $configBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($configContent))
+        Invoke-SSHCommand "echo '$configBase64' | base64 -d > /home/$User/traefik/traefik.yml" | Out-Null
+        Remove-Item "$env:TEMP\traefik.yml" -ErrorAction SilentlyContinue
         
         # Create Docker Compose file
         Write-Host "Creating Docker Compose configuration..." -ForegroundColor Cyan
         $dockerComposeConfig = @"
-version: '3.8'
-
 services:
   traefik:
     image: traefik:latest
     container_name: traefik
     restart: always
     ports:
-      - '80:80'
-      - '443:443'
-      - '8080:8080'
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - ./traefik.yml:/traefik.yml:ro
@@ -175,20 +176,25 @@ networks:
     external: true
 "@
         
-        # Write compose file using echo to avoid heredoc issues
-        $escapedCompose = $dockerComposeConfig -replace "'", "'\\''"
-        Invoke-SSHCommand "echo '$escapedCompose' > /home/$User/traefik/docker-compose.yml" | Out-Null
+        # Write compose file using base64 encoding to preserve formatting
+        $dockerComposeConfig | Out-File -FilePath "$env:TEMP\docker-compose.yml" -Encoding UTF8 -NoNewline
+        $composeContent = Get-Content "$env:TEMP\docker-compose.yml" -Raw
+        $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($composeContent))
+        Invoke-SSHCommand "echo '$composeBase64' | base64 -d > /home/$User/traefik/docker-compose.yml" | Out-Null
+        Remove-Item "$env:TEMP\docker-compose.yml" -ErrorAction SilentlyContinue
         
-        # Create docker network for Traefik
+        # Create docker network for Traefik (must exist before docker compose up)
         Write-Host "Creating Docker network for Traefik..." -ForegroundColor Cyan
-        $networkCheck = Invoke-SSHCommand "sudo docker network ls --filter name=traefik-network --format '{{.Name}}'"
+        $createNetwork = Invoke-SSHCommand "sudo docker network create traefik-network 2>&1 || true"
         
-        if ($networkCheck -notmatch "traefik-network") {
-            Invoke-SSHCommand "sudo docker network create traefik-network" | Out-Null
+        if ($createNetwork -match "already exists") {
+            Write-Host "Traefik network already exists" -ForegroundColor Gray
+        }
+        elseif ($createNetwork -match "traefik-network") {
             Write-Host "Traefik network created" -ForegroundColor Gray
         }
         else {
-            Write-Host "Traefik network already exists" -ForegroundColor Gray
+            Write-Host "Network creation output: $createNetwork" -ForegroundColor Gray
         }
         
         # Create acme.json file with correct permissions
