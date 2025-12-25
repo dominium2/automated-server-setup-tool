@@ -13,6 +13,7 @@ Import-Module "$PSScriptRoot\modules\ServicesDebian\PortainerSetupDebian.psm1" -
 Import-Module "$PSScriptRoot\modules\ServicesDebian\AdGuardSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\N8NSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\CraftySetupDebian.psm1" -Force
+Import-Module "$PSScriptRoot\modules\ServicesDebian\HeimdallSetupDebian.psm1" -Force
 
 #Gui Design XML
 [xml]$xaml = @"
@@ -467,7 +468,13 @@ $runSetupButton.Add_Click({
                         }
                     }
                     "Heimdall" {
-                        Write-TerminalOutput -Message "Heimdall deployment not yet implemented" -Color "Yellow"
+                        $heimdallSuccess = Install-Heimdall -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($heimdallSuccess) {
+                            Write-TerminalOutput -Message "Heimdall deployed successfully" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "Heimdall deployment failed" -Color "Red"
+                        }
                     }
                     "Crafty" {
                         $craftySuccess = Install-Crafty -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
