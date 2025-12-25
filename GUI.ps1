@@ -11,6 +11,7 @@ Import-Module "$PSScriptRoot\modules\ServicesDebian\DockerSetupDebian.psm1" -For
 Import-Module "$PSScriptRoot\modules\ServicesDebian\TraefikSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\PortainerSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\AdGuardSetupDebian.psm1" -Force
+Import-Module "$PSScriptRoot\modules\ServicesDebian\N8NSetupDebian.psm1" -Force
 
 #Gui Design XML
 [xml]$xaml = @"
@@ -456,7 +457,13 @@ $runSetupButton.Add_Click({
                         }
                     }
                     "N8N" {
-                        Write-TerminalOutput -Message "N8N deployment not yet implemented" -Color "Yellow"
+                        $n8nSuccess = Install-N8N -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($n8nSuccess) {
+                            Write-TerminalOutput -Message "n8n deployed successfully" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "n8n deployment failed" -Color "Red"
+                        }
                     }
                     "Heimdall" {
                         Write-TerminalOutput -Message "Heimdall deployment not yet implemented" -Color "Yellow"
