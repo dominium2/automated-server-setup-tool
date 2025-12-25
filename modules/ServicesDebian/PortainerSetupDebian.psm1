@@ -105,7 +105,7 @@ services:
       - traefik-network
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.portainer.rule=Host(\`portainer.$Domain\`)"
+      - "traefik.http.routers.portainer.rule=Host('portainer.$Domain')"
       - "traefik.http.routers.portainer.entrypoints=websecure"
       - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
       - "traefik.http.services.portainer.loadbalancer.server.port=9443"
@@ -124,6 +124,10 @@ networks:
         $dockerComposeConfig | Out-File -FilePath "$env:TEMP\docker-compose.yml" -Encoding UTF8 -NoNewline
         $composeContent = Get-Content "$env:TEMP\docker-compose.yml" -Raw
         $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($composeContent))
+        
+        # Transfer the compose file to remote server
+        Invoke-SSHCommand "echo '$composeBase64' | base64 -d > /home/$User/portainer/docker-compose.yml" | Out-Null
+        
         # Verify Traefik network exists
         Write-Host "Verifying Traefik network..." -ForegroundColor Cyan
         $networkCheck = Invoke-SSHCommand "sudo docker network ls --filter name=traefik-network --format '{{.Name}}' 2>/dev/null"
@@ -133,12 +137,11 @@ networks:
             $createNetwork = Invoke-SSHCommand "sudo docker network create traefik-network 2>&1 || true"
             if ($createNetwork -match "traefik-network|already exists") {
                 Write-Host "Traefik network ready" -ForegroundColor Gray
+            } else {
+                Write-Host "Network creation output: $createNetwork" -ForegroundColor Gray
             }
         } else {
             Write-Host "Traefik network exists" -ForegroundColor Gray
-        }
-        else {
-            Write-Host "Network creation output: $createNetwork" -ForegroundColor Gray
         }
         
         # Deploy Portainer using Docker Compose
