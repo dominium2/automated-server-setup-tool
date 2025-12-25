@@ -12,6 +12,7 @@ Import-Module "$PSScriptRoot\modules\ServicesDebian\TraefikSetupDebian.psm1" -Fo
 Import-Module "$PSScriptRoot\modules\ServicesDebian\PortainerSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\AdGuardSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\N8NSetupDebian.psm1" -Force
+Import-Module "$PSScriptRoot\modules\ServicesDebian\CraftySetupDebian.psm1" -Force
 
 #Gui Design XML
 [xml]$xaml = @"
@@ -469,7 +470,13 @@ $runSetupButton.Add_Click({
                         Write-TerminalOutput -Message "Heimdall deployment not yet implemented" -Color "Yellow"
                     }
                     "Crafty" {
-                        Write-TerminalOutput -Message "Crafty deployment not yet implemented" -Color "Yellow"
+                        $craftySuccess = Install-Crafty -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($craftySuccess) {
+                            Write-TerminalOutput -Message "Crafty deployed successfully" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "Crafty deployment failed" -Color "Red"
+                        }
                     }
                     default {
                         Write-TerminalOutput -Message "Unknown service: $($config.Service)" -Color "Red"
