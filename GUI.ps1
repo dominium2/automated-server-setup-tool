@@ -10,6 +10,7 @@ Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\DockerSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\TraefikSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\PortainerSetupDebian.psm1" -Force
+Import-Module "$PSScriptRoot\modules\ServicesDebian\AdGuardSetupDebian.psm1" -Force
 
 #Gui Design XML
 [xml]$xaml = @"
@@ -446,7 +447,13 @@ $runSetupButton.Add_Click({
                         }
                     }
                     "AdGuard" {
-                        Write-TerminalOutput -Message "AdGuard deployment not yet implemented" -Color "Yellow"
+                        $adguardSuccess = Install-AdGuard -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($adguardSuccess) {
+                            Write-TerminalOutput -Message "AdGuard deployed successfully" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "AdGuard deployment failed" -Color "Red"
+                        }
                     }
                     "N8N" {
                         Write-TerminalOutput -Message "N8N deployment not yet implemented" -Color "Yellow"
