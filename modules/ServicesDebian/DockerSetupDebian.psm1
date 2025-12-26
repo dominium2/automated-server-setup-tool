@@ -1,26 +1,27 @@
 function Install-Docker {
     <#
     .SYNOPSIS
-        Installs Docker on a Debian-based system.
+        Installs Docker on a Debian-based system or Windows WSL2.
 
     .DESCRIPTION
-        This function installs Docker Engine on a Debian-based system via SSH.
-        It checks for existing installations and installs Docker if not present.
+        This function installs Docker Engine on a Debian-based system via SSH
+        or on Windows via WSL2. It automatically detects the OS and uses the
+        appropriate connection method.
 
     .PARAMETER IP
-        The IP address of the target Debian server.
+        The IP address of the target server.
 
     .PARAMETER User
-        The username for SSH authentication.
+        The username for authentication.
 
     .PARAMETER Password
-        The password for SSH authentication.
+        The password for authentication.
 
     .EXAMPLE
         Install-Docker -IP "192.168.1.100" -User "admin" -Password "password123"
 
     .NOTES
-        Requires plink (PuTTY) to be installed for SSH connectivity.
+        Requires either plink (PuTTY) for Linux or WinRM access for Windows.
         Connection should already be validated before calling this function.
     #>
 
@@ -38,23 +39,14 @@ function Install-Docker {
     try {
         Write-Host "Checking Docker installation on $IP..." -ForegroundColor Cyan
         
-        # Check if plink is available
-        if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
-            Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
-            Write-Host "Install with: choco install putty -y" -ForegroundColor Yellow
-            return $false
-        }
-        
-        # Function to execute remote command via SSH
+        # Function to execute remote command (works on both Linux and Windows/WSL2)
         function Invoke-SSHCommand {
             param([string]$Command)
             
-            $result = Write-Output y | plink -batch -pw $Password $User@$IP $Command 2>&1
+            $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $Command
             
-            # Only treat as error if we get actual error messages
-            if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied|cannot|permission denied") {
+            if ($null -eq $result) {
                 Write-Host "Command failed: $Command" -ForegroundColor Red
-                Write-Host "Output: $result" -ForegroundColor Red
                 return $null
             }
             

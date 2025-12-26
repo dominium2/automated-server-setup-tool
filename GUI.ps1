@@ -15,6 +15,9 @@ Import-Module "$PSScriptRoot\modules\ServicesDebian\N8NSetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\CraftySetupDebian.psm1" -Force
 Import-Module "$PSScriptRoot\modules\ServicesDebian\HeimdallSetupDebian.psm1" -Force
 
+# Load Windows service modules
+Import-Module "$PSScriptRoot\modules\ServicesWindows\WSL2SetupWindows.psm1" -Force
+
 #Gui Design XML
 [xml]$xaml = @"
 <Window 
@@ -491,7 +494,104 @@ $runSetupButton.Add_Click({
                 }
             }
             elseif ($osType -eq "Windows") {
-                Write-TerminalOutput -Message "Windows deployment not yet implemented" -Color "Yellow"
+                Write-TerminalOutput -Message "Deploying on Windows system..." -Color "Yellow"
+                
+                # Step 1: Install WSL2 first
+                Write-TerminalOutput -Message "Step 1: Installing WSL2 (required for containerized services)..." -Color "Cyan"
+                $wsl2Success = Install-WSL2 -IP $config.IP -User $config.User -Password $config.Password -Distribution "Ubuntu"
+                
+                if (-not $wsl2Success) {
+                    Write-TerminalOutput -Message "WSL2 installation failed. Cannot proceed with service deployment." -Color "Red"
+                    Write-TerminalOutput -Message "Please ensure WSL2 prerequisites are met and try again." -Color "Yellow"
+                    continue
+                }
+                
+                Write-TerminalOutput -Message "WSL2 installed successfully" -Color "Green"
+                Write-TerminalOutput -Message "Note: A system reboot may be required. Services will be deployed in WSL2." -Color "Yellow"
+                
+                # Step 2: Deploy the selected service inside WSL2
+                Write-TerminalOutput -Message "Step 2: Deploying service inside WSL2: $($config.Service)" -Color "Yellow"
+                Write-TerminalOutput -Message "Connecting to WSL2 instance..." -Color "Cyan"
+                
+                # Install Docker in WSL2 (required for all services)
+                Write-TerminalOutput -Message "Ensuring Docker is installed in WSL2..." -Color "Cyan"
+                $dockerInstalled = Install-Docker -IP $config.IP -User $config.User -Password $config.Password
+                
+                if (-not $dockerInstalled) {
+                    Write-TerminalOutput -Message "Failed to install Docker in WSL2. Skipping service deployment." -Color "Red"
+                    Write-TerminalOutput -Message "You may need to reboot the system and run the setup again." -Color "Yellow"
+                    continue
+                }
+                
+                # Install Traefik (once per server)
+                if (-not $traefikInstalled.ContainsKey($config.IP)) {
+                    Write-TerminalOutput -Message "Installing Traefik reverse proxy in WSL2..." -Color "Cyan"
+                    $traefikSuccess = Install-Traefik -IP $config.IP -User $config.User -Password $config.Password
+                    
+                    if ($traefikSuccess) {
+                        $traefikInstalled[$config.IP] = $true
+                        Write-TerminalOutput -Message "Traefik installed successfully in WSL2" -Color "Green"
+                    }
+                    else {
+                        Write-TerminalOutput -Message "Warning: Traefik installation failed, services will use direct ports" -Color "Yellow"
+                        $traefikInstalled[$config.IP] = $false
+                    }
+                }
+                else {
+                    Write-TerminalOutput -Message "Traefik already installed on this server" -Color "Gray"
+                }
+                
+                # Deploy the selected service in WSL2
+                switch ($config.Service) {
+                    "Portainer" {
+                        $portainerSuccess = Install-Portainer -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($portainerSuccess) {
+                            Write-TerminalOutput -Message "Portainer deployed successfully in WSL2" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "Portainer deployment failed" -Color "Red"
+                        }
+                    }
+                    "AdGuard" {
+                        $adguardSuccess = Install-AdGuard -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($adguardSuccess) {
+                            Write-TerminalOutput -Message "AdGuard deployed successfully in WSL2" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "AdGuard deployment failed" -Color "Red"
+                        }
+                    }
+                    "N8N" {
+                        $n8nSuccess = Install-N8N -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($n8nSuccess) {
+                            Write-TerminalOutput -Message "n8n deployed successfully in WSL2" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "n8n deployment failed" -Color "Red"
+                        }
+                    }
+                    "Heimdall" {
+                        $heimdallSuccess = Install-Heimdall -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($heimdallSuccess) {
+                            Write-TerminalOutput -Message "Heimdall deployed successfully in WSL2" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "Heimdall deployment failed" -Color "Red"
+                        }
+                    }
+                    "Crafty" {
+                        $craftySuccess = Install-Crafty -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
+                        if ($craftySuccess) {
+                            Write-TerminalOutput -Message "Crafty deployed successfully in WSL2" -Color "Green"
+                        }
+                        else {
+                            Write-TerminalOutput -Message "Crafty deployment failed" -Color "Red"
+                        }
+                    }
+                    default {
+                        Write-TerminalOutput -Message "Unknown service: $($config.Service)" -Color "Red"
+                    }
+                }
             }
             else {
                 Write-TerminalOutput -Message "Unable to detect OS type. Skipping deployment." -Color "Red"
