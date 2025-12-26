@@ -261,7 +261,164 @@ function Test-RemoteConnection {
     }
 }
 
+function Invoke-WSLCommand {
+    param (
+        [string]$IP,
+        [string]$User,
+        [string]$Password,
+        [string]$Command,
+        [string]$Distribution = "Ubuntu"
+    )
+    
+    try {
+        # Create credential object
+        $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+        $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
+        
+        # Create session options
+        $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+        
+        # Establish remote session to Windows machine
+        $session = New-PSSession -ComputerName $IP -Credential $credential -SessionOption $sessionOption -ErrorAction Stop
+        
+        if (-not $session) {
+            Write-Host "Failed to establish remote session to $IP" -ForegroundColor Red
+            return $null
+        }
+        
+        # Execute command inside WSL2
+        $result = Invoke-Command -Session $session -ScriptBlock {
+            param($Cmd, $Distro)
+            
+            # First, check if the distribution exists
+            $distroList = wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
+            
+            if ($distroList -notmatch $Distro) {
+                return @{
+                    Output = "Distribution '$Distro' not found. Available distributions: $($distroList -join ', ')"
+                    ExitCode = 1
+                }
+            }
+            
+            # Check if distribution is running, if not start it
+            $runningDistros = wsl --list --running --quiet 2>&1 | Where-Object { $_ -match '\S' }
+            if ($runningDistros -notmatch $Distro) {
+                # Start the distribution
+                wsl -d $Distro -u root echo "Starting distribution..." 2>&1 | Out-Null
+                Start-Sleep -Seconds 2
+            }
+            
+            # Execute the command in WSL as root (since we may not have a regular user set up)
+            $output = wsl -d $Distro -u root bash -c $Cmd 2>&1
+            
+            return @{
+                Output = $output
+                ExitCode = $LASTEXITCODE
+            }
+        } -ArgumentList $Command, $Distribution
+        
+        # Close the session
+        Remove-PSSession -Session $session
+        
+        return $result
+    }
+    catch {
+        Write-Host "Error executing WSL command on $IP : $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+}
 
+function Invoke-RemoteCommand {
+    <#
+    .SYNOPSIS
+        Executes a command on a remote system (Linux via SSH or Windows via WSL2).
+
+    .DESCRIPTION
+        This function automatically detects the OS and routes commands appropriately:
+        - Linux systems: Uses SSH (plink)
+        - Windows systems: Uses WinRM to execute commands in WSL2
+
+    .PARAMETER IP
+        The IP address of the target server.
+
+    .PARAMETER User
+        The username for authentication.
+
+    .PARAMETER Password
+        The password for authentication.
+
+    .PARAMETER Command
+        The Linux/bash command to execute.
+
+    .EXAMPLE
+        Invoke-RemoteCommand -IP "192.168.1.100" -User "admin" -Password "pass" -Command "docker --version"
+    #>
+    
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$IP,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$User,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$Password,
+        
+        [Parameter(Mandatory=$true)]
+        [string]$Command
+    )
+    
+    try {
+        # Detect the OS
+        $osType = Get-TargetOS -IP $IP
+        
+        if ($osType -eq "Linux") {
+            # Use SSH for Linux systems
+            if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
+                Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
+                return $null
+            }
+            
+            $result = Write-Output y | plink -batch -pw $Password "$User@$IP" $Command 2>&1
+            
+            if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied|cannot|permission denied") {
+                return $null
+            }
+            
+            return $result
+        }
+        elseif ($osType -eq "Windows") {
+            # Use WSL2 for Windows systems
+            $wslResult = Invoke-WSLCommand -IP $IP -User $User -Password $Password -Command $Command
+            
+            if ($null -eq $wslResult) {
+                Write-Host "WSL command execution failed" -ForegroundColor Red
+                return $null
+            }
+            
+            # Check for distribution errors
+            if ($wslResult.ExitCode -ne 0 -and $wslResult.Output -match "no distribution|not found") {
+                Write-Host "Error: $($wslResult.Output)" -ForegroundColor Red
+                return $null
+            }
+            
+            if ($wslResult.ExitCode -ne 0 -and $wslResult.Output -match "error|fatal|failed|denied|cannot|permission denied") {
+                Write-Host "Command error: $($wslResult.Output)" -ForegroundColor Yellow
+                return $null
+            }
+            
+            return $wslResult.Output
+        }
+        else {
+            Write-Host "Unable to detect OS type for $IP" -ForegroundColor Red
+            return $null
+        }
+    }
+    catch {
+        Write-Host "Error executing remote command: $($_.Exception.Message)" -ForegroundColor Red
+        return $null
+    }
+}
 
 # Export functions to make them available when module is imported
-Export-ModuleMember -Function Test-RemoteConnection, Test-SSHConnection, Test-WinRMConnection, Get-TargetOS
+Export-ModuleMember -Function Test-RemoteConnection, Test-SSHConnection, Test-WinRMConnection, Get-TargetOS, Invoke-WSLCommand, Invoke-RemoteCommand
