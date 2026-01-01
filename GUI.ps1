@@ -11,6 +11,9 @@ if (-not $scriptRoot) { $scriptRoot = Get-Location }
 Import-Module (Join-Path $scriptRoot "modules\Logging.psm1") -Force -Scope Global
 Import-Module (Join-Path $scriptRoot "modules\RemoteConnection.psm1") -Force -Scope Global
 
+# Load health monitoring module
+Import-Module (Join-Path $scriptRoot "modules\HealthMonitoring.psm1") -Force -Scope Global
+
 # Load service modules
 Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\DockerSetupDebian.psm1") -Force
 Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\TraefikSetupDebian.psm1") -Force
@@ -49,7 +52,8 @@ Write-LogInfo -Message "Application started" -Component "GUI"
         <!-- Top Button Bar -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
             <Button Name="AddServerButton" Content="Add Server" Width="120" Height="35" Margin="0,0,10,0" FontSize="14"/>
-            <Button Name="RunSetupButton" Content="Run Setup" Width="120" Height="35" Background="Green" Foreground="White" FontSize="14"/>
+            <Button Name="RunSetupButton" Content="Run Setup" Width="120" Height="35" Background="Green" Foreground="White" FontSize="14" Margin="0,0,10,0"/>
+            <Button Name="HealthMonitorButton" Content="Health Monitor" Width="130" Height="35" Background="#2196F3" Foreground="White" FontSize="14"/>
         </StackPanel>
         
         <!-- Server Container with ScrollViewer -->
@@ -350,6 +354,7 @@ $window = [Windows.Markup.XamlReader]::Load( $reader )
 
 $addServerButton = $window.FindName("AddServerButton")
 $runSetupButton = $window.FindName("RunSetupButton")
+$healthMonitorButton = $window.FindName("HealthMonitorButton")
 $serverContainer = $window.FindName("ServerContainer")
 $clearOutputButton = $window.FindName("ClearOutputButton")
 $simpleTerminalButton = $window.FindName("SimpleTerminalButton")
@@ -374,6 +379,534 @@ function Update-TerminalModeButtons {
 
 # Initialize button styles
 Update-TerminalModeButtons
+
+# Function to show the Health Monitoring Window
+function Show-HealthMonitorWindow {
+    param($ServerConfigs)
+    
+    Write-LogInfo -Message "Opening Health Monitor window" -Component "HealthMonitor"
+    
+    # Create the Health Monitor Window XAML
+    [xml]$healthXaml = @"
+<Window 
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Server &amp; Container Health Monitor" 
+    Height="700" 
+    Width="1000"
+    WindowStartupLocation="CenterScreen">
+    
+    <Grid Margin="10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <!-- Control Bar -->
+        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
+            <Button Name="RefreshButton" Content="🔄 Refresh All" Width="120" Height="30" Margin="0,0,10,0" FontSize="12"/>
+            <Button Name="AutoRefreshButton" Content="Auto-Refresh: OFF" Width="140" Height="30" Margin="0,0,10,0" FontSize="12"/>
+            <Label Content="Interval:" VerticalAlignment="Center" Margin="10,0,5,0"/>
+            <ComboBox Name="RefreshIntervalCombo" Width="80" Height="30" VerticalAlignment="Center">
+                <ComboBoxItem Content="10 sec" IsSelected="True"/>
+                <ComboBoxItem Content="30 sec"/>
+                <ComboBoxItem Content="1 min"/>
+                <ComboBoxItem Content="5 min"/>
+            </ComboBox>
+        </StackPanel>
+        
+        <!-- Status Summary -->
+        <Border Grid.Row="1" Background="#F5F5F5" CornerRadius="5" Padding="10" Margin="0,0,0,10">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Name="SummaryText" Text="Select servers to monitor..." FontSize="14" VerticalAlignment="Center"/>
+            </StackPanel>
+        </Border>
+        
+        <!-- Main Content Area -->
+        <TabControl Grid.Row="2">
+            <TabItem Header="Server Health">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Name="ServerHealthPanel" Margin="10"/>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Container Health">
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <StackPanel Name="ContainerHealthPanel" Margin="10"/>
+                </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Health Report">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="10">
+                        <Button Name="GenerateReportButton" Content="Generate Full Report" Width="150" Height="30"/>
+                        <Button Name="ExportReportButton" Content="Export Report" Width="120" Height="30" Margin="10,0,0,0"/>
+                    </StackPanel>
+                    <RichTextBox Name="ReportOutput" Grid.Row="1" 
+                        IsReadOnly="True" 
+                        Background="#1E1E1E" 
+                        Foreground="White" 
+                        FontFamily="Consolas" 
+                        FontSize="11"
+                        Padding="10"
+                        Margin="10"
+                        VerticalScrollBarVisibility="Auto"
+                        HorizontalScrollBarVisibility="Auto"/>
+                </Grid>
+            </TabItem>
+        </TabControl>
+        
+        <!-- Status Bar -->
+        <Border Grid.Row="3" Background="#E0E0E0" Padding="5" Margin="0,10,0,0">
+            <TextBlock Name="StatusBarText" Text="Ready" FontSize="11"/>
+        </Border>
+    </Grid>
+</Window>
+"@
+
+    $healthReader = New-Object System.Xml.XmlNodeReader $healthXaml
+    $healthWindow = [Windows.Markup.XamlReader]::Load($healthReader)
+    
+    # Find controls
+    $refreshButton = $healthWindow.FindName("RefreshButton")
+    $autoRefreshButton = $healthWindow.FindName("AutoRefreshButton")
+    $refreshIntervalCombo = $healthWindow.FindName("RefreshIntervalCombo")
+    $summaryText = $healthWindow.FindName("SummaryText")
+    $serverHealthPanel = $healthWindow.FindName("ServerHealthPanel")
+    $containerHealthPanel = $healthWindow.FindName("ContainerHealthPanel")
+    $generateReportButton = $healthWindow.FindName("GenerateReportButton")
+    $exportReportButton = $healthWindow.FindName("ExportReportButton")
+    $reportOutput = $healthWindow.FindName("ReportOutput")
+    $statusBarText = $healthWindow.FindName("StatusBarText")
+    
+    # Auto-refresh state
+    $script:autoRefreshEnabled = $false
+    $script:autoRefreshTimer = $null
+    $script:lastHealthData = @{}
+    
+    # Function to write to report output
+    function Write-ReportOutput {
+        param([string]$Message, [string]$Color = "White")
+        
+        $reportOutput.Dispatcher.Invoke([action]{
+            $paragraph = New-Object System.Windows.Documents.Paragraph
+            $paragraph.Margin = New-Object System.Windows.Thickness(0)
+            $run = New-Object System.Windows.Documents.Run($Message)
+            
+            switch ($Color) {
+                "Green" { $run.Foreground = [System.Windows.Media.Brushes]::LimeGreen }
+                "Red" { $run.Foreground = [System.Windows.Media.Brushes]::Red }
+                "Yellow" { $run.Foreground = [System.Windows.Media.Brushes]::Yellow }
+                "Cyan" { $run.Foreground = [System.Windows.Media.Brushes]::Cyan }
+                "Gray" { $run.Foreground = [System.Windows.Media.Brushes]::Gray }
+                default { $run.Foreground = [System.Windows.Media.Brushes]::White }
+            }
+            
+            $paragraph.Inlines.Add($run)
+            $reportOutput.Document.Blocks.Add($paragraph)
+        }, "Normal")
+    }
+    
+    # Function to create a server health card
+    function New-ServerHealthCard {
+        param($ServerConfig, $HealthData)
+        
+        $border = New-Object System.Windows.Controls.Border
+        $border.BorderBrush = [System.Windows.Media.Brushes]::Gray
+        $border.BorderThickness = New-Object System.Windows.Thickness(1)
+        $border.CornerRadius = New-Object System.Windows.CornerRadius(5)
+        $border.Padding = New-Object System.Windows.Thickness(10)
+        $border.Margin = New-Object System.Windows.Thickness(0,0,0,10)
+        
+        # Set background color based on status
+        $brushConverter = New-Object System.Windows.Media.BrushConverter
+        if ($HealthData.StatusColor -eq "Red") {
+            $border.Background = $brushConverter.ConvertFromString("#FFEBEE")
+        }
+        elseif ($HealthData.StatusColor -eq "Yellow") {
+            $border.Background = $brushConverter.ConvertFromString("#FFF8E1")
+        }
+        else {
+            $border.Background = $brushConverter.ConvertFromString("#E8F5E9")
+        }
+        
+        $grid = New-Object System.Windows.Controls.Grid
+        
+        # Column definitions
+        $col1 = New-Object System.Windows.Controls.ColumnDefinition
+        $col1.Width = "200"
+        $col2 = New-Object System.Windows.Controls.ColumnDefinition
+        $col2.Width = "*"
+        [void]$grid.ColumnDefinitions.Add($col1)
+        [void]$grid.ColumnDefinitions.Add($col2)
+        
+        # Server info
+        $serverInfo = New-Object System.Windows.Controls.StackPanel
+        [System.Windows.Controls.Grid]::SetColumn($serverInfo, 0)
+        
+        $ipText = New-Object System.Windows.Controls.TextBlock
+        $ipText.Text = "Server: $($ServerConfig.IP)"
+        $ipText.FontWeight = "Bold"
+        $ipText.FontSize = 14
+        [void]$serverInfo.Children.Add($ipText)
+        
+        $statusText = New-Object System.Windows.Controls.TextBlock
+        $statusText.Text = "Status: $($HealthData.Status)"
+        $statusText.FontSize = 12
+        if ($HealthData.StatusColor -eq "Red") { $statusText.Foreground = [System.Windows.Media.Brushes]::Red }
+        elseif ($HealthData.StatusColor -eq "Yellow") { $statusText.Foreground = [System.Windows.Media.Brushes]::Orange }
+        else { $statusText.Foreground = [System.Windows.Media.Brushes]::Green }
+        [void]$serverInfo.Children.Add($statusText)
+        
+        if ($HealthData.OSType) {
+            $osText = New-Object System.Windows.Controls.TextBlock
+            $osText.Text = "OS: $($HealthData.OSType)"
+            $osText.FontSize = 11
+            $osText.Foreground = [System.Windows.Media.Brushes]::Gray
+            [void]$serverInfo.Children.Add($osText)
+        }
+        
+        [void]$grid.Children.Add($serverInfo)
+        
+        # Metrics
+        $metricsPanel = New-Object System.Windows.Controls.WrapPanel
+        [System.Windows.Controls.Grid]::SetColumn($metricsPanel, 1)
+        
+        if ($HealthData.CPU) {
+            $cpuBorder = New-Object System.Windows.Controls.Border
+            $cpuBorder.Background = [System.Windows.Media.Brushes]::White
+            $cpuBorder.CornerRadius = New-Object System.Windows.CornerRadius(3)
+            $cpuBorder.Padding = New-Object System.Windows.Thickness(8,4,8,4)
+            $cpuBorder.Margin = New-Object System.Windows.Thickness(5)
+            $cpuText = New-Object System.Windows.Controls.TextBlock
+            $cpuText.Text = "CPU: $($HealthData.CPU.UsagePercent)%"
+            $cpuBorder.Child = $cpuText
+            [void]$metricsPanel.Children.Add($cpuBorder)
+        }
+        
+        if ($HealthData.Memory) {
+            $memBorder = New-Object System.Windows.Controls.Border
+            $memBorder.Background = [System.Windows.Media.Brushes]::White
+            $memBorder.CornerRadius = New-Object System.Windows.CornerRadius(3)
+            $memBorder.Padding = New-Object System.Windows.Thickness(8,4,8,4)
+            $memBorder.Margin = New-Object System.Windows.Thickness(5)
+            $memText = New-Object System.Windows.Controls.TextBlock
+            $memText.Text = "Memory: $($HealthData.Memory.UsagePercent)%"
+            $memBorder.Child = $memText
+            [void]$metricsPanel.Children.Add($memBorder)
+        }
+        
+        if ($HealthData.Disk) {
+            $diskBorder = New-Object System.Windows.Controls.Border
+            $diskBorder.Background = [System.Windows.Media.Brushes]::White
+            $diskBorder.CornerRadius = New-Object System.Windows.CornerRadius(3)
+            $diskBorder.Padding = New-Object System.Windows.Thickness(8,4,8,4)
+            $diskBorder.Margin = New-Object System.Windows.Thickness(5)
+            $diskText = New-Object System.Windows.Controls.TextBlock
+            $diskText.Text = "Disk: $($HealthData.Disk.UsagePercent)%"
+            $diskBorder.Child = $diskText
+            [void]$metricsPanel.Children.Add($diskBorder)
+        }
+        
+        if ($HealthData.Uptime) {
+            $uptimeBorder = New-Object System.Windows.Controls.Border
+            $uptimeBorder.Background = [System.Windows.Media.Brushes]::White
+            $uptimeBorder.CornerRadius = New-Object System.Windows.CornerRadius(3)
+            $uptimeBorder.Padding = New-Object System.Windows.Thickness(8,4,8,4)
+            $uptimeBorder.Margin = New-Object System.Windows.Thickness(5)
+            $uptimeText = New-Object System.Windows.Controls.TextBlock
+            $uptimeText.Text = "Uptime: $($HealthData.Uptime)"
+            $uptimeBorder.Child = $uptimeText
+            [void]$metricsPanel.Children.Add($uptimeBorder)
+        }
+        
+        [void]$grid.Children.Add($metricsPanel)
+        
+        $border.Child = $grid
+        return $border
+    }
+    
+    # Function to create a container health card
+    function New-ContainerHealthCard {
+        param($ServerIP, $ContainerData)
+        
+        $border = New-Object System.Windows.Controls.Border
+        $border.BorderBrush = [System.Windows.Media.Brushes]::Gray
+        $border.BorderThickness = New-Object System.Windows.Thickness(1)
+        $border.CornerRadius = New-Object System.Windows.CornerRadius(5)
+        $border.Padding = New-Object System.Windows.Thickness(10)
+        $border.Margin = New-Object System.Windows.Thickness(0,0,0,10)
+        
+        $brushConverter = New-Object System.Windows.Media.BrushConverter
+        if ($ContainerData.StatusColor -eq "Red") {
+            $border.Background = $brushConverter.ConvertFromString("#FFEBEE")
+        }
+        elseif ($ContainerData.StatusColor -eq "Yellow") {
+            $border.Background = $brushConverter.ConvertFromString("#FFF8E1")
+        }
+        else {
+            $border.Background = $brushConverter.ConvertFromString("#E8F5E9")
+        }
+        
+        $mainStack = New-Object System.Windows.Controls.StackPanel
+        
+        # Header
+        $headerText = New-Object System.Windows.Controls.TextBlock
+        $headerText.Text = "Server: $ServerIP - Containers ($($ContainerData.RunningContainers)/$($ContainerData.TotalContainers) running)"
+        $headerText.FontWeight = "Bold"
+        $headerText.FontSize = 14
+        $headerText.Margin = New-Object System.Windows.Thickness(0,0,0,10)
+        [void]$mainStack.Children.Add($headerText)
+        
+        # Container list
+        if ($ContainerData.Containers -and $ContainerData.Containers.Count -gt 0) {
+            foreach ($container in $ContainerData.Containers) {
+                $containerBorder = New-Object System.Windows.Controls.Border
+                $containerBorder.Background = [System.Windows.Media.Brushes]::White
+                $containerBorder.CornerRadius = New-Object System.Windows.CornerRadius(3)
+                $containerBorder.Padding = New-Object System.Windows.Thickness(8)
+                $containerBorder.Margin = New-Object System.Windows.Thickness(0,0,0,5)
+                
+                $containerGrid = New-Object System.Windows.Controls.Grid
+                $col1 = New-Object System.Windows.Controls.ColumnDefinition
+                $col1.Width = "150"
+                $col2 = New-Object System.Windows.Controls.ColumnDefinition
+                $col2.Width = "*"
+                $col3 = New-Object System.Windows.Controls.ColumnDefinition
+                $col3.Width = "100"
+                [void]$containerGrid.ColumnDefinitions.Add($col1)
+                [void]$containerGrid.ColumnDefinitions.Add($col2)
+                [void]$containerGrid.ColumnDefinitions.Add($col3)
+                
+                # Container name with state icon
+                $namePanel = New-Object System.Windows.Controls.StackPanel
+                $namePanel.Orientation = "Horizontal"
+                [System.Windows.Controls.Grid]::SetColumn($namePanel, 0)
+                
+                $stateIcon = New-Object System.Windows.Controls.TextBlock
+                if ($container.State -eq "running") {
+                    $stateIcon.Text = "● "
+                    $stateIcon.Foreground = [System.Windows.Media.Brushes]::Green
+                }
+                else {
+                    $stateIcon.Text = "○ "
+                    $stateIcon.Foreground = [System.Windows.Media.Brushes]::Red
+                }
+                [void]$namePanel.Children.Add($stateIcon)
+                
+                $nameText = New-Object System.Windows.Controls.TextBlock
+                $nameText.Text = $container.Name
+                $nameText.FontWeight = "SemiBold"
+                [void]$namePanel.Children.Add($nameText)
+                [void]$containerGrid.Children.Add($namePanel)
+                
+                # Container status and metrics
+                $statusPanel = New-Object System.Windows.Controls.StackPanel
+                $statusPanel.Orientation = "Horizontal"
+                [System.Windows.Controls.Grid]::SetColumn($statusPanel, 1)
+                
+                $statusInfo = New-Object System.Windows.Controls.TextBlock
+                $statusInfo.Text = "$($container.Status)"
+                $statusInfo.Foreground = [System.Windows.Media.Brushes]::Gray
+                $statusInfo.Margin = New-Object System.Windows.Thickness(10,0,10,0)
+                [void]$statusPanel.Children.Add($statusInfo)
+                
+                if ($container.State -eq "running" -and $container.CPUPercent) {
+                    $resourceInfo = New-Object System.Windows.Controls.TextBlock
+                    $resourceInfo.Text = "| CPU: $($container.CPUPercent)% | Mem: $($container.MemoryPercent)%"
+                    $resourceInfo.Foreground = [System.Windows.Media.Brushes]::DarkGray
+                    [void]$statusPanel.Children.Add($resourceInfo)
+                }
+                
+                [void]$containerGrid.Children.Add($statusPanel)
+                
+                # Container image
+                $imageText = New-Object System.Windows.Controls.TextBlock
+                $imageText.Text = $container.Image
+                $imageText.Foreground = [System.Windows.Media.Brushes]::Gray
+                $imageText.FontSize = 10
+                $imageText.TextTrimming = "CharacterEllipsis"
+                [System.Windows.Controls.Grid]::SetColumn($imageText, 2)
+                [void]$containerGrid.Children.Add($imageText)
+                
+                $containerBorder.Child = $containerGrid
+                [void]$mainStack.Children.Add($containerBorder)
+            }
+        }
+        else {
+            $noContainersText = New-Object System.Windows.Controls.TextBlock
+            $noContainersText.Text = "No containers found"
+            $noContainersText.Foreground = [System.Windows.Media.Brushes]::Gray
+            $noContainersText.FontStyle = "Italic"
+            [void]$mainStack.Children.Add($noContainersText)
+        }
+        
+        $border.Child = $mainStack
+        return $border
+    }
+    
+    # Function to refresh health data
+    function Refresh-HealthData {
+        $statusBarText.Text = "Refreshing health data..."
+        $serverHealthPanel.Children.Clear()
+        $containerHealthPanel.Children.Clear()
+        
+        $healthyCount = 0
+        $warningCount = 0
+        $criticalCount = 0
+        
+        foreach ($config in $ServerConfigs) {
+            if ([string]::IsNullOrWhiteSpace($config.IP)) { continue }
+            
+            # Get server health
+            $serverHealth = Get-ServerHealth -IP $config.IP -User $config.User -Password $config.Password
+            $script:lastHealthData[$config.IP] = @{ Server = $serverHealth }
+            
+            # Create and add server health card
+            $serverCard = New-ServerHealthCard -ServerConfig $config -HealthData $serverHealth
+            [void]$serverHealthPanel.Children.Add($serverCard)
+            
+            # Count statuses
+            switch ($serverHealth.Status) {
+                "Healthy" { $healthyCount++ }
+                "Warning" { $warningCount++ }
+                "Degraded" { $warningCount++ }
+                default { $criticalCount++ }
+            }
+            
+            # Get container health
+            $containerHealth = Get-ContainerHealth -IP $config.IP -User $config.User -Password $config.Password
+            $script:lastHealthData[$config.IP].Containers = $containerHealth
+            
+            # Create and add container health card
+            $containerCard = New-ContainerHealthCard -ServerIP $config.IP -ContainerData $containerHealth
+            [void]$containerHealthPanel.Children.Add($containerCard)
+        }
+        
+        # Update summary
+        $summaryText.Text = "Servers: $($ServerConfigs.Count) | ✅ Healthy: $healthyCount | ⚠️ Warning: $warningCount | ❌ Critical: $criticalCount | Last Updated: $(Get-Date -Format 'HH:mm:ss')"
+        $statusBarText.Text = "Ready - Last refresh: $(Get-Date -Format 'HH:mm:ss')"
+        
+        Write-LogInfo -Message "Health data refreshed for $($ServerConfigs.Count) server(s)" -Component "HealthMonitor"
+    }
+    
+    # Refresh button click handler
+    $refreshButton.Add_Click({
+        Refresh-HealthData
+    })
+    
+    # Auto-refresh button click handler
+    $autoRefreshButton.Add_Click({
+        if ($script:autoRefreshEnabled) {
+            # Disable auto-refresh
+            $script:autoRefreshEnabled = $false
+            $autoRefreshButton.Content = "Auto-Refresh: OFF"
+            if ($script:autoRefreshTimer) {
+                $script:autoRefreshTimer.Stop()
+            }
+            $statusBarText.Text = "Auto-refresh disabled"
+        }
+        else {
+            # Enable auto-refresh
+            $script:autoRefreshEnabled = $true
+            $autoRefreshButton.Content = "Auto-Refresh: ON"
+            
+            # Get interval
+            $intervalText = $refreshIntervalCombo.SelectedItem.Content
+            $intervalMs = switch ($intervalText) {
+                "10 sec" { 10000 }
+                "30 sec" { 30000 }
+                "1 min" { 60000 }
+                "5 min" { 300000 }
+                default { 30000 }
+            }
+            
+            # Create and start timer
+            $script:autoRefreshTimer = New-Object System.Windows.Threading.DispatcherTimer
+            $script:autoRefreshTimer.Interval = [TimeSpan]::FromMilliseconds($intervalMs)
+            $script:autoRefreshTimer.Add_Tick({ Refresh-HealthData })
+            $script:autoRefreshTimer.Start()
+            
+            $statusBarText.Text = "Auto-refresh enabled (every $intervalText)"
+        }
+    })
+    
+    # Generate report button click handler
+    $generateReportButton.Add_Click({
+        $reportOutput.Document.Blocks.Clear()
+        Write-ReportOutput -Message "Generating comprehensive health report..." -Color "Cyan"
+        Write-ReportOutput -Message "" -Color "White"
+        
+        foreach ($config in $ServerConfigs) {
+            if ([string]::IsNullOrWhiteSpace($config.IP)) { continue }
+            
+            $fullReport = Get-FullHealthReport -IP $config.IP -User $config.User -Password $config.Password
+            $formattedReport = Format-HealthReport -HealthReport $fullReport
+            
+            foreach ($line in ($formattedReport -split "`n")) {
+                $color = "White"
+                if ($line -match "Healthy|SUCCESS|running") { $color = "Green" }
+                elseif ($line -match "Critical|Error|FAILED|stopped") { $color = "Red" }
+                elseif ($line -match "Warning|Degraded") { $color = "Yellow" }
+                elseif ($line -match "═|─|┌|┐|└|┘|│") { $color = "Cyan" }
+                
+                Write-ReportOutput -Message $line -Color $color
+            }
+            
+            Write-ReportOutput -Message "" -Color "White"
+        }
+        
+        Write-ReportOutput -Message "Report generation complete." -Color "Cyan"
+        $statusBarText.Text = "Full health report generated"
+    })
+    
+    # Export report button click handler
+    $exportReportButton.Add_Click({
+        $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
+        $saveDialog.Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*"
+        $saveDialog.DefaultExt = ".txt"
+        $saveDialog.FileName = "health-report_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').txt"
+        
+        if ($saveDialog.ShowDialog() -eq $true) {
+            $reportContent = @()
+            foreach ($config in $ServerConfigs) {
+                if ([string]::IsNullOrWhiteSpace($config.IP)) { continue }
+                
+                $fullReport = Get-FullHealthReport -IP $config.IP -User $config.User -Password $config.Password
+                $formattedReport = Format-HealthReport -HealthReport $fullReport
+                $reportContent += $formattedReport
+                $reportContent += ""
+            }
+            
+            $reportContent | Out-File -FilePath $saveDialog.FileName -Encoding UTF8
+            $statusBarText.Text = "Report exported to: $($saveDialog.FileName)"
+            [System.Windows.MessageBox]::Show("Health report exported successfully!", "Export Complete", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+        }
+    })
+    
+    # Window closing handler - cleanup timer
+    $healthWindow.Add_Closing({
+        if ($script:autoRefreshTimer) {
+            $script:autoRefreshTimer.Stop()
+        }
+    })
+    
+    # Initial refresh if we have server configs
+    if ($ServerConfigs.Count -gt 0) {
+        Refresh-HealthData
+    }
+    else {
+        $summaryText.Text = "No servers configured. Add servers in the main window first."
+        $statusBarText.Text = "No servers to monitor"
+    }
+    
+    # Show the window
+    $healthWindow.ShowDialog() | Out-Null
+}
 
 # Add first server box on startup
 Add-ServerBox
@@ -411,6 +944,36 @@ $advancedTerminalButton.Add_Click({
         Write-TerminalOutput -Message "Output will include timestamps and verbose details." -Color "Gray"
         Write-TerminalOutput -Message "" -Color "White"
     }
+})
+
+$healthMonitorButton.Add_Click({
+    Write-LogInfo -Message "Health Monitor button clicked" -Component "GUI"
+    
+    # Collect all server configurations
+    $allServerConfigs = Get-AllServerConfigs
+    
+    # Filter out empty configurations
+    $validConfigs = @()
+    foreach ($config in $allServerConfigs) {
+        if (-not [string]::IsNullOrWhiteSpace($config.IP) -and 
+            -not [string]::IsNullOrWhiteSpace($config.User) -and 
+            -not [string]::IsNullOrWhiteSpace($config.Password)) {
+            $validConfigs += $config
+        }
+    }
+    
+    if ($validConfigs.Count -eq 0) {
+        Write-TerminalOutput -Message "No valid server configurations found. Please add at least one server with IP, user, and password." -Color "Yellow"
+        [System.Windows.MessageBox]::Show("Please add at least one server with IP address, username, and password before opening Health Monitor.", "No Servers Configured", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Warning)
+        return
+    }
+    
+    Write-TerminalOutput -Message "Opening Health Monitor for $($validConfigs.Count) server(s)..." -Color "Cyan"
+    
+    # Show the health monitor window
+    Show-HealthMonitorWindow -ServerConfigs $validConfigs
+    
+    Write-TerminalOutput -Message "Health Monitor closed." -Color "Gray"
 })
 
 $runSetupButton.Add_Click({
