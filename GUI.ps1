@@ -4,6 +4,7 @@ Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
 #Load modules
+Import-Module "$PSScriptRoot\modules\Logging.psm1" -Force
 Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
 
 # Load service modules
@@ -17,6 +18,12 @@ Import-Module "$PSScriptRoot\modules\ServicesDebian\HeimdallSetupDebian.psm1" -F
 
 # Load Windows service modules
 Import-Module "$PSScriptRoot\modules\ServicesWindows\WSL2SetupWindows.psm1" -Force
+
+# Initialize logging
+$logPath = Initialize-Logging -LogLevel "Debug" -LogToFile $true -LogToConsole $false
+Write-SessionSeparator -SessionName "Automated Server Setup Tool"
+Write-LogInfo -Message "Application started" -Component "GUI"
+Write-LogInfo -Message "Log file: $logPath" -Component "GUI"
 
 #Gui Design XML
 [xml]$xaml = @"
@@ -404,13 +411,21 @@ $advancedTerminalButton.Add_Click({
 })
 
 $runSetupButton.Add_Click({
+    Write-LogInfo -Message "Run Setup button clicked" -Component "GUI"
+    
     # Collect all server configurations
     $allServerConfigs = Get-AllServerConfigs
+    Write-LogInfo -Message "Collected $($allServerConfigs.Count) server configuration(s)" -Component "GUI"
     
     # Validate configurations
     $validationErrors = Test-ServerConfigs -Configs $allServerConfigs
     
     if ($validationErrors.Count -gt 0) {
+        Write-LogWarning -Message "Validation failed with $($validationErrors.Count) error(s)" -Component "GUI"
+        foreach ($validationError in $validationErrors) {
+            Write-LogWarning -Message "Validation: $validationError" -Component "GUI"
+        }
+        
         # Show validation errors in terminal and message box
         Write-TerminalOutput -Message "" -Color "White"
         Write-TerminalOutput -Message "========== Validation Errors ==========" -Color "Red"
@@ -425,6 +440,8 @@ $runSetupButton.Add_Click({
         return
     }
     
+    Write-LogInfo -Message "Validation passed, starting deployment" -Component "GUI"
+    
     # Display configurations in terminal
     Write-TerminalOutput -Message "" -Color "White"
     Write-TerminalOutput -Message "========== Server Configurations ==========" -Color "Cyan"
@@ -432,6 +449,7 @@ $runSetupButton.Add_Click({
     Write-TerminalOutput -Message "" -Color "White"
     
     foreach ($config in $allServerConfigs) {
+        Write-LogDebug -Message "Server $($config.ServerNumber): IP=$($config.IP), User=$($config.User), Service=$($config.Service)" -Component "GUI"
         Write-TerminalOutput -Message "Server $($config.ServerNumber):" -Color "Yellow"
         Write-TerminalOutput -Message "  IP Address: $($config.IP)" -Color "White"
         Write-TerminalOutput -Message "  User: $($config.User)" -Color "White"
@@ -449,107 +467,132 @@ $runSetupButton.Add_Click({
     
     # Test connections and deploy services
     foreach ($config in $allServerConfigs) {
+        Write-LogInfo -Message "Processing Server $($config.ServerNumber): $($config.IP)" -Component "Deployment"
         Write-TerminalOutput -Message "--- Processing Server $($config.ServerNumber) ---" -Color "Cyan"
         
         # Test connection to the server
+        Write-LogDebug -Message "Testing connection to $($config.IP)" -Component "Deployment"
         $connectionResult = Test-RemoteConnection -IP $config.IP -User $config.User -Password $config.Password
         
         if ($connectionResult) {
+            Write-LogSuccess -Message "Connected to $($config.IP)" -Component "Deployment"
             Write-TerminalOutput -Message "Successfully connected to $($config.IP)" -Color "Green"
             
             # Get the OS type
             $osType = Get-TargetOS -IP $config.IP
+            Write-LogInfo -Message "Detected OS: $osType for $($config.IP)" -Component "Deployment"
             Write-TerminalOutput -Message "Detected OS: $osType" -Color "Cyan"
             
             # Deploy service based on OS
             if ($osType -eq "Linux") {
+                Write-LogInfo -Message "Starting Linux deployment for $($config.IP)" -Component "Deployment"
                 Write-TerminalOutput -Message "Deploying on Linux system..." -Color "Yellow"
                 
                 # Install Docker first (required for all services)
+                Write-LogDebug -Message "Installing Docker on $($config.IP)" -Component "Deployment"
                 Write-TerminalOutput -Message "Ensuring Docker is installed..." -Color "Cyan"
                 $dockerInstalled = Install-Docker -IP $config.IP -User $config.User -Password $config.Password
                 
                 if (-not $dockerInstalled) {
+                    Write-LogError -Message "Docker installation failed on $($config.IP)" -Component "Deployment"
                     Write-TerminalOutput -Message "Failed to install Docker. Skipping service deployment." -Color "Red"
                     continue
                 }
                 
                 # Install Traefik (once per server)
                 if (-not $traefikInstalled.ContainsKey($config.IP)) {
+                    Write-LogInfo -Message "Installing Traefik on $($config.IP)" -Component "Deployment"
                     Write-TerminalOutput -Message "Installing Traefik reverse proxy..." -Color "Cyan"
                     $traefikSuccess = Install-Traefik -IP $config.IP -User $config.User -Password $config.Password
                     
                     if ($traefikSuccess) {
                         $traefikInstalled[$config.IP] = $true
+                        Write-LogSuccess -Message "Traefik installed on $($config.IP)" -Component "Deployment"
                         Write-TerminalOutput -Message "Traefik installed successfully" -Color "Green"
                     }
                     else {
+                        Write-LogWarning -Message "Traefik installation failed on $($config.IP)" -Component "Deployment"
                         Write-TerminalOutput -Message "Warning: Traefik installation failed, services will use direct ports" -Color "Yellow"
                         $traefikInstalled[$config.IP] = $false
                     }
                 }
                 else {
+                    Write-LogDebug -Message "Traefik already installed on $($config.IP)" -Component "Deployment"
                     Write-TerminalOutput -Message "Traefik already installed on this server" -Color "Gray"
                 }
                 
                 # Deploy the selected service
+                Write-LogInfo -Message "Deploying $($config.Service) on $($config.IP)" -Component "Deployment"
                 Write-TerminalOutput -Message "Deploying service: $($config.Service)" -Color "Yellow"
                 
                 switch ($config.Service) {
                     "Portainer" {
                         $portainerSuccess = Install-Portainer -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($portainerSuccess) {
+                            Write-LogSuccess -Message "Portainer deployed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Portainer deployed successfully" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "Portainer deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Portainer deployment failed" -Color "Red"
                         }
                     }
                     "AdGuard" {
                         $adguardSuccess = Install-AdGuard -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($adguardSuccess) {
+                            Write-LogSuccess -Message "AdGuard deployed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "AdGuard deployed successfully" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "AdGuard deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "AdGuard deployment failed" -Color "Red"
                         }
                     }
                     "N8N" {
                         $n8nSuccess = Install-N8N -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($n8nSuccess) {
+                            Write-LogSuccess -Message "N8N deployed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "n8n deployed successfully" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "N8N deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "n8n deployment failed" -Color "Red"
                         }
                     }
                     "Heimdall" {
                         $heimdallSuccess = Install-Heimdall -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($heimdallSuccess) {
+                            Write-LogSuccess -Message "Heimdall deployed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Heimdall deployed successfully" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "Heimdall deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Heimdall deployment failed" -Color "Red"
                         }
                     }
                     "Crafty" {
                         $craftySuccess = Install-Crafty -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($craftySuccess) {
+                            Write-LogSuccess -Message "Crafty deployed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Crafty deployed successfully" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "Crafty deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Crafty deployment failed" -Color "Red"
                         }
                     }
                     default {
+                        Write-LogWarning -Message "Unknown service: $($config.Service)" -Component "Deployment"
                         Write-TerminalOutput -Message "Unknown service: $($config.Service)" -Color "Red"
                     }
                 }
             }
             elseif ($osType -eq "Windows") {
+                Write-LogInfo -Message "Starting Windows deployment for $($config.IP)" -Component "Deployment"
                 Write-TerminalOutput -Message "Deploying on Windows system..." -Color "Yellow"
                 
                 # Step 1: Install WSL2 first (with automatic reboot if needed)
+                Write-LogInfo -Message "Installing WSL2 on $($config.IP)" -Component "Deployment"
                 Write-TerminalOutput -Message "Step 1: Installing WSL2 (required for containerized services)..." -Color "Cyan"
                 $wsl2Result = Install-WSL2 -IP $config.IP -User $config.User -Password $config.Password -Distribution "Ubuntu" -AutoReboot -WaitForReboot
                 
@@ -570,6 +613,7 @@ $runSetupButton.Add_Click({
                 }
                 
                 if (-not $wsl2Success) {
+                    Write-LogError -Message "WSL2 installation failed on $($config.IP)" -Component "Deployment"
                     Write-TerminalOutput -Message "WSL2 installation failed. Cannot proceed with service deployment." -Color "Red"
                     Write-TerminalOutput -Message "Please ensure WSL2 prerequisites are met and try again." -Color "Yellow"
                     continue
@@ -577,6 +621,7 @@ $runSetupButton.Add_Click({
                 
                 # Check if reboot is still required (shouldn't happen with AutoReboot, but just in case)
                 if ($wsl2NeedsReboot -and -not $wsl2Ready) {
+                    Write-LogWarning -Message "System reboot required on $($config.IP)" -Component "Deployment"
                     Write-TerminalOutput -Message "" -Color "Yellow"
                     Write-TerminalOutput -Message "========================================" -Color "Yellow"
                     Write-TerminalOutput -Message "  SYSTEM REBOOT STILL REQUIRED" -Color "Yellow"
@@ -638,54 +683,66 @@ $runSetupButton.Add_Click({
                     "AdGuard" {
                         $adguardSuccess = Install-AdGuard -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($adguardSuccess) {
+                            Write-LogSuccess -Message "AdGuard deployed in WSL2 on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "AdGuard deployed successfully in WSL2" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "AdGuard deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "AdGuard deployment failed" -Color "Red"
                         }
                     }
                     "N8N" {
                         $n8nSuccess = Install-N8N -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($n8nSuccess) {
+                            Write-LogSuccess -Message "N8N deployed in WSL2 on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "n8n deployed successfully in WSL2" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "N8N deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "n8n deployment failed" -Color "Red"
                         }
                     }
                     "Heimdall" {
                         $heimdallSuccess = Install-Heimdall -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($heimdallSuccess) {
+                            Write-LogSuccess -Message "Heimdall deployed in WSL2 on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Heimdall deployed successfully in WSL2" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "Heimdall deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Heimdall deployment failed" -Color "Red"
                         }
                     }
                     "Crafty" {
                         $craftySuccess = Install-Crafty -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
                         if ($craftySuccess) {
+                            Write-LogSuccess -Message "Crafty deployed in WSL2 on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Crafty deployed successfully in WSL2" -Color "Green"
                         }
                         else {
+                            Write-LogError -Message "Crafty deployment failed on $($config.IP)" -Component "Deployment"
                             Write-TerminalOutput -Message "Crafty deployment failed" -Color "Red"
                         }
                     }
                     default {
+                        Write-LogWarning -Message "Unknown service: $($config.Service)" -Component "Deployment"
                         Write-TerminalOutput -Message "Unknown service: $($config.Service)" -Color "Red"
                     }
                 }
             }
             else {
+                Write-LogError -Message "Unable to detect OS type for $($config.IP)" -Component "Deployment"
                 Write-TerminalOutput -Message "Unable to detect OS type. Skipping deployment." -Color "Red"
             }
         }
         else {
+            Write-LogError -Message "Connection failed to $($config.IP)" -Component "Deployment"
             Write-TerminalOutput -Message "Failed to connect to $($config.IP). Skipping..." -Color "Red"
         }
         Write-TerminalOutput -Message "" -Color "White"
     }
     
+    Write-LogInfo -Message "Deployment process completed" -Component "Deployment"
     Write-TerminalOutput -Message "========== Deployment Complete ==========" -Color "Cyan"
     Write-TerminalOutput -Message "" -Color "White"
 })
