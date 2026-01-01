@@ -441,253 +441,379 @@ $runSetupButton.Add_Click({
     }
     
     Write-TerminalOutput -Message "==========================================" -Color "Cyan"
-    Write-TerminalOutput -Message "Validation passed! Starting deployment..." -Color "Green"
+    Write-TerminalOutput -Message "Validation passed! Starting parallel deployment..." -Color "Green"
+    Write-TerminalOutput -Message "Deploying to $($allServerConfigs.Count) server(s) simultaneously..." -Color "Cyan"
     Write-TerminalOutput -Message "" -Color "White"
     
-    # Track Traefik installation per server
-    $traefikInstalled = @{}
+    # Disable the Run Setup button during deployment
+    $runSetupButton.IsEnabled = $false
+    $runSetupButton.Content = "Deploying..."
     
-    # Test connections and deploy services
-    foreach ($config in $allServerConfigs) {
-        Write-TerminalOutput -Message "--- Processing Server $($config.ServerNumber) ---" -Color "Cyan"
+    # Create a thread-safe collection for output messages
+    $script:outputQueue = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
+    
+    # Create runspace pool for parallel execution
+    $runspacePool = [runspacefactory]::CreateRunspacePool(1, [Math]::Max($allServerConfigs.Count, 1))
+    $runspacePool.Open()
+    
+    # Store all runspaces and handles
+    $runspaces = @()
+    
+    # Define the scriptblock that will run for each server
+    $serverDeploymentScript = {
+        param(
+            $Config,
+            $OutputQueue,
+            $ModulesPath
+        )
+        
+        # Helper function to queue output messages
+        function Send-Output {
+            param([string]$Message, [string]$Color = "White", [int]$ServerNum)
+            $OutputQueue.Enqueue(@{
+                Message = $Message
+                Color = $Color
+                ServerNum = $ServerNum
+            })
+        }
+        
+        # Import modules in the runspace
+        Import-Module "$ModulesPath\RemoteConnection.psm1" -Force
+        Import-Module "$ModulesPath\ServicesDebian\DockerSetupDebian.psm1" -Force
+        Import-Module "$ModulesPath\ServicesDebian\TraefikSetupDebian.psm1" -Force
+        Import-Module "$ModulesPath\ServicesDebian\PortainerSetupDebian.psm1" -Force
+        Import-Module "$ModulesPath\ServicesDebian\AdGuardSetupDebian.psm1" -Force
+        Import-Module "$ModulesPath\ServicesDebian\N8NSetupDebian.psm1" -Force
+        Import-Module "$ModulesPath\ServicesDebian\CraftySetupDebian.psm1" -Force
+        Import-Module "$ModulesPath\ServicesDebian\HeimdallSetupDebian.psm1" -Force
+        Import-Module "$ModulesPath\ServicesWindows\WSL2SetupWindows.psm1" -Force
+        
+        $serverNum = $Config.ServerNumber
+        Send-Output -Message "[Server $serverNum] Starting deployment to $($Config.IP)..." -Color "Cyan" -ServerNum $serverNum
         
         # Test connection to the server
-        $connectionResult = Test-RemoteConnection -IP $config.IP -User $config.User -Password $config.Password
+        $connectionResult = Test-RemoteConnection -IP $Config.IP -User $Config.User -Password $Config.Password
         
-        if ($connectionResult) {
-            Write-TerminalOutput -Message "Successfully connected to $($config.IP)" -Color "Green"
+        if (-not $connectionResult) {
+            Send-Output -Message "[Server $serverNum] Failed to connect to $($Config.IP). Skipping..." -Color "Red" -ServerNum $serverNum
+            return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Connection failed" }
+        }
+        
+        Send-Output -Message "[Server $serverNum] Successfully connected to $($Config.IP)" -Color "Green" -ServerNum $serverNum
+        
+        # Get the OS type
+        $osType = Get-TargetOS -IP $Config.IP
+        Send-Output -Message "[Server $serverNum] Detected OS: $osType" -Color "Cyan" -ServerNum $serverNum
+        
+        # Deploy service based on OS
+        if ($osType -eq "Linux") {
+            Send-Output -Message "[Server $serverNum] Deploying on Linux system..." -Color "Yellow" -ServerNum $serverNum
             
-            # Get the OS type
-            $osType = Get-TargetOS -IP $config.IP
-            Write-TerminalOutput -Message "Detected OS: $osType" -Color "Cyan"
+            # Install Docker first (required for all services)
+            Send-Output -Message "[Server $serverNum] Ensuring Docker is installed..." -Color "Cyan" -ServerNum $serverNum
+            $dockerInstalled = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password
             
-            # Deploy service based on OS
-            if ($osType -eq "Linux") {
-                Write-TerminalOutput -Message "Deploying on Linux system..." -Color "Yellow"
-                
-                # Install Docker first (required for all services)
-                Write-TerminalOutput -Message "Ensuring Docker is installed..." -Color "Cyan"
-                $dockerInstalled = Install-Docker -IP $config.IP -User $config.User -Password $config.Password
-                
-                if (-not $dockerInstalled) {
-                    Write-TerminalOutput -Message "Failed to install Docker. Skipping service deployment." -Color "Red"
-                    continue
-                }
-                
-                # Install Traefik (once per server)
-                if (-not $traefikInstalled.ContainsKey($config.IP)) {
-                    Write-TerminalOutput -Message "Installing Traefik reverse proxy..." -Color "Cyan"
-                    $traefikSuccess = Install-Traefik -IP $config.IP -User $config.User -Password $config.Password
-                    
-                    if ($traefikSuccess) {
-                        $traefikInstalled[$config.IP] = $true
-                        Write-TerminalOutput -Message "Traefik installed successfully" -Color "Green"
-                    }
-                    else {
-                        Write-TerminalOutput -Message "Warning: Traefik installation failed, services will use direct ports" -Color "Yellow"
-                        $traefikInstalled[$config.IP] = $false
-                    }
-                }
-                else {
-                    Write-TerminalOutput -Message "Traefik already installed on this server" -Color "Gray"
-                }
-                
-                # Deploy the selected service
-                Write-TerminalOutput -Message "Deploying service: $($config.Service)" -Color "Yellow"
-                
-                switch ($config.Service) {
-                    "Portainer" {
-                        $portainerSuccess = Install-Portainer -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($portainerSuccess) {
-                            Write-TerminalOutput -Message "Portainer deployed successfully" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "Portainer deployment failed" -Color "Red"
-                        }
-                    }
-                    "AdGuard" {
-                        $adguardSuccess = Install-AdGuard -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($adguardSuccess) {
-                            Write-TerminalOutput -Message "AdGuard deployed successfully" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "AdGuard deployment failed" -Color "Red"
-                        }
-                    }
-                    "N8N" {
-                        $n8nSuccess = Install-N8N -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($n8nSuccess) {
-                            Write-TerminalOutput -Message "n8n deployed successfully" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "n8n deployment failed" -Color "Red"
-                        }
-                    }
-                    "Heimdall" {
-                        $heimdallSuccess = Install-Heimdall -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($heimdallSuccess) {
-                            Write-TerminalOutput -Message "Heimdall deployed successfully" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "Heimdall deployment failed" -Color "Red"
-                        }
-                    }
-                    "Crafty" {
-                        $craftySuccess = Install-Crafty -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($craftySuccess) {
-                            Write-TerminalOutput -Message "Crafty deployed successfully" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "Crafty deployment failed" -Color "Red"
-                        }
-                    }
-                    default {
-                        Write-TerminalOutput -Message "Unknown service: $($config.Service)" -Color "Red"
-                    }
-                }
+            if (-not $dockerInstalled) {
+                Send-Output -Message "[Server $serverNum] Failed to install Docker. Skipping service deployment." -Color "Red" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
             }
-            elseif ($osType -eq "Windows") {
-                Write-TerminalOutput -Message "Deploying on Windows system..." -Color "Yellow"
-                
-                # Step 1: Install WSL2 first (with automatic reboot if needed)
-                Write-TerminalOutput -Message "Step 1: Installing WSL2 (required for containerized services)..." -Color "Cyan"
-                $wsl2Result = Install-WSL2 -IP $config.IP -User $config.User -Password $config.Password -Distribution "Ubuntu" -AutoReboot -WaitForReboot
-                
-                # Handle the new return format (hashtable with Success, NeedsReboot, Ready properties)
-                $wsl2Success = $false
-                $wsl2NeedsReboot = $false
-                $wsl2Ready = $false
-                
-                if ($wsl2Result -is [hashtable]) {
-                    $wsl2Success = $wsl2Result.Success
-                    $wsl2NeedsReboot = $wsl2Result.NeedsReboot
-                    $wsl2Ready = $wsl2Result.Ready
-                }
-                elseif ($wsl2Result -is [bool]) {
-                    # Backward compatibility
-                    $wsl2Success = $wsl2Result
-                    $wsl2Ready = $wsl2Result
-                }
-                
-                if (-not $wsl2Success) {
-                    Write-TerminalOutput -Message "WSL2 installation failed. Cannot proceed with service deployment." -Color "Red"
-                    Write-TerminalOutput -Message "Please ensure WSL2 prerequisites are met and try again." -Color "Yellow"
-                    continue
-                }
-                
-                # Check if reboot is still required (shouldn't happen with AutoReboot, but just in case)
-                if ($wsl2NeedsReboot -and -not $wsl2Ready) {
-                    Write-TerminalOutput -Message "" -Color "Yellow"
-                    Write-TerminalOutput -Message "========================================" -Color "Yellow"
-                    Write-TerminalOutput -Message "  SYSTEM REBOOT STILL REQUIRED" -Color "Yellow"
-                    Write-TerminalOutput -Message "========================================" -Color "Yellow"
-                    Write-TerminalOutput -Message "Automatic reboot may have failed. Please reboot manually:" -Color "Yellow"
-                    Write-TerminalOutput -Message "  Restart-Computer -ComputerName $($config.IP) -Credential `$cred -Force" -Color "Gray"
-                    Write-TerminalOutput -Message "" -Color "Yellow"
-                    continue
-                }
-                
-                Write-TerminalOutput -Message "WSL2 is ready" -Color "Green"
-                
-                # Step 2: Deploy the selected service inside WSL2
-                Write-TerminalOutput -Message "Step 2: Deploying service inside WSL2: $($config.Service)" -Color "Yellow"
-                Write-TerminalOutput -Message "Connecting to WSL2 instance..." -Color "Cyan"
-                
-                # Install Docker in WSL2 (required for all services)
-                Write-TerminalOutput -Message "Ensuring Docker is installed in WSL2..." -Color "Cyan"
-                $dockerInstalled = Install-Docker -IP $config.IP -User $config.User -Password $config.Password
-                
-                if (-not $dockerInstalled) {
-                    Write-TerminalOutput -Message "Failed to install Docker in WSL2. Skipping service deployment." -Color "Red"
-                    Write-TerminalOutput -Message "This may indicate WSL2 is not fully ready. Please verify:" -Color "Yellow"
-                    Write-TerminalOutput -Message "  1. The system has been rebooted after WSL2 feature installation" -Color "White"
-                    Write-TerminalOutput -Message "  2. WSL2 Ubuntu distribution is installed and accessible" -Color "White"
-                    Write-TerminalOutput -Message "You can check on the remote system by running: wsl --list --verbose" -Color "Cyan"
-                    continue
-                }
-                
-                # Install Traefik (once per server)
-                if (-not $traefikInstalled.ContainsKey($config.IP)) {
-                    Write-TerminalOutput -Message "Installing Traefik reverse proxy in WSL2..." -Color "Cyan"
-                    $traefikSuccess = Install-Traefik -IP $config.IP -User $config.User -Password $config.Password
-                    
-                    if ($traefikSuccess) {
-                        $traefikInstalled[$config.IP] = $true
-                        Write-TerminalOutput -Message "Traefik installed successfully in WSL2" -Color "Green"
-                    }
-                    else {
-                        Write-TerminalOutput -Message "Warning: Traefik installation failed, services will use direct ports" -Color "Yellow"
-                        $traefikInstalled[$config.IP] = $false
-                    }
-                }
-                else {
-                    Write-TerminalOutput -Message "Traefik already installed on this server" -Color "Gray"
-                }
-                
-                # Deploy the selected service in WSL2
-                switch ($config.Service) {
-                    "Portainer" {
-                        $portainerSuccess = Install-Portainer -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($portainerSuccess) {
-                            Write-TerminalOutput -Message "Portainer deployed successfully in WSL2" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "Portainer deployment failed" -Color "Red"
-                        }
-                    }
-                    "AdGuard" {
-                        $adguardSuccess = Install-AdGuard -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($adguardSuccess) {
-                            Write-TerminalOutput -Message "AdGuard deployed successfully in WSL2" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "AdGuard deployment failed" -Color "Red"
-                        }
-                    }
-                    "N8N" {
-                        $n8nSuccess = Install-N8N -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($n8nSuccess) {
-                            Write-TerminalOutput -Message "n8n deployed successfully in WSL2" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "n8n deployment failed" -Color "Red"
-                        }
-                    }
-                    "Heimdall" {
-                        $heimdallSuccess = Install-Heimdall -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($heimdallSuccess) {
-                            Write-TerminalOutput -Message "Heimdall deployed successfully in WSL2" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "Heimdall deployment failed" -Color "Red"
-                        }
-                    }
-                    "Crafty" {
-                        $craftySuccess = Install-Crafty -IP $config.IP -User $config.User -Password $config.Password -Domain "localhost"
-                        if ($craftySuccess) {
-                            Write-TerminalOutput -Message "Crafty deployed successfully in WSL2" -Color "Green"
-                        }
-                        else {
-                            Write-TerminalOutput -Message "Crafty deployment failed" -Color "Red"
-                        }
-                    }
-                    default {
-                        Write-TerminalOutput -Message "Unknown service: $($config.Service)" -Color "Red"
-                    }
-                }
+            
+            # Install Traefik
+            Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy..." -Color "Cyan" -ServerNum $serverNum
+            $traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+            
+            if ($traefikSuccess) {
+                Send-Output -Message "[Server $serverNum] Traefik installed successfully" -Color "Green" -ServerNum $serverNum
             }
             else {
-                Write-TerminalOutput -Message "Unable to detect OS type. Skipping deployment." -Color "Red"
+                Send-Output -Message "[Server $serverNum] Warning: Traefik installation failed, services will use direct ports" -Color "Yellow" -ServerNum $serverNum
             }
+            
+            # Deploy the selected service
+            Send-Output -Message "[Server $serverNum] Deploying service: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
+            
+            $serviceSuccess = $false
+            switch ($Config.Service) {
+                "Portainer" {
+                    $serviceSuccess = Install-Portainer -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] Portainer deployed successfully" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] Portainer deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                "AdGuard" {
+                    $serviceSuccess = Install-AdGuard -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] AdGuard deployed successfully" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] AdGuard deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                "N8N" {
+                    $serviceSuccess = Install-N8N -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] n8n deployed successfully" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] n8n deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                "Heimdall" {
+                    $serviceSuccess = Install-Heimdall -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] Heimdall deployed successfully" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] Heimdall deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                "Crafty" {
+                    $serviceSuccess = Install-Crafty -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] Crafty deployed successfully" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] Crafty deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                default {
+                    Send-Output -Message "[Server $serverNum] Unknown service: $($Config.Service)" -Color "Red" -ServerNum $serverNum
+                }
+            }
+            
+            Send-Output -Message "[Server $serverNum] Deployment complete" -Color "Cyan" -ServerNum $serverNum
+            return @{ Success = $serviceSuccess; ServerNum = $serverNum; IP = $Config.IP; Service = $Config.Service }
+        }
+        elseif ($osType -eq "Windows") {
+            Send-Output -Message "[Server $serverNum] Deploying on Windows system..." -Color "Yellow" -ServerNum $serverNum
+            
+            # Step 1: Install WSL2 first (with automatic reboot if needed)
+            Send-Output -Message "[Server $serverNum] Step 1: Installing WSL2 (required for containerized services)..." -Color "Cyan" -ServerNum $serverNum
+            $wsl2Result = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -Distribution "Ubuntu" -AutoReboot -WaitForReboot
+            
+            # Handle the new return format (hashtable with Success, NeedsReboot, Ready properties)
+            $wsl2Success = $false
+            $wsl2NeedsReboot = $false
+            $wsl2Ready = $false
+            
+            if ($wsl2Result -is [hashtable]) {
+                $wsl2Success = $wsl2Result.Success
+                $wsl2NeedsReboot = $wsl2Result.NeedsReboot
+                $wsl2Ready = $wsl2Result.Ready
+            }
+            elseif ($wsl2Result -is [bool]) {
+                # Backward compatibility
+                $wsl2Success = $wsl2Result
+                $wsl2Ready = $wsl2Result
+            }
+            
+            if (-not $wsl2Success) {
+                Send-Output -Message "[Server $serverNum] WSL2 installation failed. Cannot proceed with service deployment." -Color "Red" -ServerNum $serverNum
+                Send-Output -Message "[Server $serverNum] Please ensure WSL2 prerequisites are met and try again." -Color "Yellow" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "WSL2 installation failed" }
+            }
+            
+            # Check if reboot is still required
+            if ($wsl2NeedsReboot -and -not $wsl2Ready) {
+                Send-Output -Message "[Server $serverNum] SYSTEM REBOOT STILL REQUIRED" -Color "Yellow" -ServerNum $serverNum
+                Send-Output -Message "[Server $serverNum] Automatic reboot may have failed. Please reboot manually." -Color "Yellow" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Reboot required" }
+            }
+            
+            Send-Output -Message "[Server $serverNum] WSL2 is ready" -Color "Green" -ServerNum $serverNum
+            
+            # Step 2: Deploy the selected service inside WSL2
+            Send-Output -Message "[Server $serverNum] Step 2: Deploying service inside WSL2: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
+            Send-Output -Message "[Server $serverNum] Connecting to WSL2 instance..." -Color "Cyan" -ServerNum $serverNum
+            
+            # Install Docker in WSL2 (required for all services)
+            Send-Output -Message "[Server $serverNum] Ensuring Docker is installed in WSL2..." -Color "Cyan" -ServerNum $serverNum
+            $dockerInstalled = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password
+            
+            if (-not $dockerInstalled) {
+                Send-Output -Message "[Server $serverNum] Failed to install Docker in WSL2. Skipping service deployment." -Color "Red" -ServerNum $serverNum
+                Send-Output -Message "[Server $serverNum] This may indicate WSL2 is not fully ready." -Color "Yellow" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker in WSL2 failed" }
+            }
+            
+            # Install Traefik
+            Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy in WSL2..." -Color "Cyan" -ServerNum $serverNum
+            $traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+            
+            if ($traefikSuccess) {
+                Send-Output -Message "[Server $serverNum] Traefik installed successfully in WSL2" -Color "Green" -ServerNum $serverNum
+            }
+            else {
+                Send-Output -Message "[Server $serverNum] Warning: Traefik installation failed, services will use direct ports" -Color "Yellow" -ServerNum $serverNum
+            }
+            
+            # Deploy the selected service in WSL2
+            $serviceSuccess = $false
+            switch ($Config.Service) {
+                "Portainer" {
+                    $serviceSuccess = Install-Portainer -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] Portainer deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] Portainer deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                "AdGuard" {
+                    $serviceSuccess = Install-AdGuard -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] AdGuard deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] AdGuard deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                "N8N" {
+                    $serviceSuccess = Install-N8N -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] n8n deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] n8n deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                "Heimdall" {
+                    $serviceSuccess = Install-Heimdall -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] Heimdall deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] Heimdall deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                "Crafty" {
+                    $serviceSuccess = Install-Crafty -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    if ($serviceSuccess) {
+                        Send-Output -Message "[Server $serverNum] Crafty deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
+                    }
+                    else {
+                        Send-Output -Message "[Server $serverNum] Crafty deployment failed" -Color "Red" -ServerNum $serverNum
+                    }
+                }
+                default {
+                    Send-Output -Message "[Server $serverNum] Unknown service: $($Config.Service)" -Color "Red" -ServerNum $serverNum
+                }
+            }
+            
+            Send-Output -Message "[Server $serverNum] Deployment complete" -Color "Cyan" -ServerNum $serverNum
+            return @{ Success = $serviceSuccess; ServerNum = $serverNum; IP = $Config.IP; Service = $Config.Service }
         }
         else {
-            Write-TerminalOutput -Message "Failed to connect to $($config.IP). Skipping..." -Color "Red"
+            Send-Output -Message "[Server $serverNum] Unable to detect OS type. Skipping deployment." -Color "Red" -ServerNum $serverNum
+            return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Unknown OS" }
         }
-        Write-TerminalOutput -Message "" -Color "White"
     }
     
-    Write-TerminalOutput -Message "========== Deployment Complete ==========" -Color "Cyan"
-    Write-TerminalOutput -Message "" -Color "White"
+    # Start parallel deployment for each server
+    foreach ($config in $allServerConfigs) {
+        $powershell = [powershell]::Create()
+        $powershell.RunspacePool = $runspacePool
+        
+        [void]$powershell.AddScript($serverDeploymentScript)
+        [void]$powershell.AddArgument($config)
+        [void]$powershell.AddArgument($script:outputQueue)
+        [void]$powershell.AddArgument("$PSScriptRoot\modules")
+        
+        $handle = $powershell.BeginInvoke()
+        
+        $runspaces += @{
+            PowerShell = $powershell
+            Handle = $handle
+            ServerNum = $config.ServerNumber
+        }
+    }
+    
+    # Create a timer to poll for output messages and check completion
+    $script:deploymentTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:deploymentTimer.Interval = [TimeSpan]::FromMilliseconds(100)
+    $script:deploymentRunspaces = $runspaces
+    $script:deploymentRunspacePool = $runspacePool
+    $script:deploymentResults = @()
+    
+    $script:deploymentTimer.Add_Tick({
+        # Process any queued output messages
+        $outputItem = $null
+        while ($script:outputQueue.TryDequeue([ref]$outputItem)) {
+            Write-TerminalOutput -Message $outputItem.Message -Color $outputItem.Color
+        }
+        
+        # Check if all runspaces are complete
+        $allComplete = $true
+        foreach ($rs in $script:deploymentRunspaces) {
+            if (-not $rs.Handle.IsCompleted) {
+                $allComplete = $false
+                break
+            }
+        }
+        
+        if ($allComplete) {
+            # Stop the timer
+            $script:deploymentTimer.Stop()
+            
+            # Collect results
+            foreach ($rs in $script:deploymentRunspaces) {
+                try {
+                    $result = $rs.PowerShell.EndInvoke($rs.Handle)
+                    if ($result) {
+                        $script:deploymentResults += $result
+                    }
+                }
+                catch {
+                    Write-TerminalOutput -Message "[Server $($rs.ServerNum)] Error: $_" -Color "Red"
+                }
+                finally {
+                    $rs.PowerShell.Dispose()
+                }
+            }
+            
+            # Process any remaining queued messages
+            $outputItem = $null
+            while ($script:outputQueue.TryDequeue([ref]$outputItem)) {
+                Write-TerminalOutput -Message $outputItem.Message -Color $outputItem.Color
+            }
+            
+            # Clean up runspace pool
+            $script:deploymentRunspacePool.Close()
+            $script:deploymentRunspacePool.Dispose()
+            
+            # Summary
+            Write-TerminalOutput -Message "" -Color "White"
+            Write-TerminalOutput -Message "========== Deployment Summary ==========" -Color "Cyan"
+            
+            $successCount = ($script:deploymentResults | Where-Object { $_.Success -eq $true }).Count
+            $failCount = ($script:deploymentResults | Where-Object { $_.Success -eq $false }).Count
+            
+            Write-TerminalOutput -Message "Successful: $successCount" -Color "Green"
+            Write-TerminalOutput -Message "Failed: $failCount" -Color $(if ($failCount -gt 0) { "Red" } else { "Green" })
+            
+            foreach ($result in $script:deploymentResults) {
+                if ($result.Success) {
+                    Write-TerminalOutput -Message "  [Server $($result.ServerNum)] $($result.IP) - $($result.Service): SUCCESS" -Color "Green"
+                }
+                else {
+                    Write-TerminalOutput -Message "  [Server $($result.ServerNum)] $($result.IP): FAILED - $($result.Error)" -Color "Red"
+                }
+            }
+            
+            Write-TerminalOutput -Message "========== Parallel Deployment Complete ==========" -Color "Cyan"
+            Write-TerminalOutput -Message "" -Color "White"
+            
+            # Re-enable the button
+            $runSetupButton.IsEnabled = $true
+            $runSetupButton.Content = "Run Setup"
+        }
+    })
+    
+    # Start the timer
+    $script:deploymentTimer.Start()
 })
 
 #Show the Window
