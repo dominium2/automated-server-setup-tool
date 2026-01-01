@@ -549,9 +549,25 @@ $runSetupButton.Add_Click({
             elseif ($osType -eq "Windows") {
                 Write-TerminalOutput -Message "Deploying on Windows system..." -Color "Yellow"
                 
-                # Step 1: Install WSL2 first
+                # Step 1: Install WSL2 first (with automatic reboot if needed)
                 Write-TerminalOutput -Message "Step 1: Installing WSL2 (required for containerized services)..." -Color "Cyan"
-                $wsl2Success = Install-WSL2 -IP $config.IP -User $config.User -Password $config.Password -Distribution "Ubuntu"
+                $wsl2Result = Install-WSL2 -IP $config.IP -User $config.User -Password $config.Password -Distribution "Ubuntu" -AutoReboot -WaitForReboot
+                
+                # Handle the new return format (hashtable with Success, NeedsReboot, Ready properties)
+                $wsl2Success = $false
+                $wsl2NeedsReboot = $false
+                $wsl2Ready = $false
+                
+                if ($wsl2Result -is [hashtable]) {
+                    $wsl2Success = $wsl2Result.Success
+                    $wsl2NeedsReboot = $wsl2Result.NeedsReboot
+                    $wsl2Ready = $wsl2Result.Ready
+                }
+                elseif ($wsl2Result -is [bool]) {
+                    # Backward compatibility
+                    $wsl2Success = $wsl2Result
+                    $wsl2Ready = $wsl2Result
+                }
                 
                 if (-not $wsl2Success) {
                     Write-TerminalOutput -Message "WSL2 installation failed. Cannot proceed with service deployment." -Color "Red"
@@ -559,8 +575,19 @@ $runSetupButton.Add_Click({
                     continue
                 }
                 
-                Write-TerminalOutput -Message "WSL2 installed successfully" -Color "Green"
-                Write-TerminalOutput -Message "Note: A system reboot may be required. Services will be deployed in WSL2." -Color "Yellow"
+                # Check if reboot is still required (shouldn't happen with AutoReboot, but just in case)
+                if ($wsl2NeedsReboot -and -not $wsl2Ready) {
+                    Write-TerminalOutput -Message "" -Color "Yellow"
+                    Write-TerminalOutput -Message "========================================" -Color "Yellow"
+                    Write-TerminalOutput -Message "  SYSTEM REBOOT STILL REQUIRED" -Color "Yellow"
+                    Write-TerminalOutput -Message "========================================" -Color "Yellow"
+                    Write-TerminalOutput -Message "Automatic reboot may have failed. Please reboot manually:" -Color "Yellow"
+                    Write-TerminalOutput -Message "  Restart-Computer -ComputerName $($config.IP) -Credential `$cred -Force" -Color "Gray"
+                    Write-TerminalOutput -Message "" -Color "Yellow"
+                    continue
+                }
+                
+                Write-TerminalOutput -Message "WSL2 is ready" -Color "Green"
                 
                 # Step 2: Deploy the selected service inside WSL2
                 Write-TerminalOutput -Message "Step 2: Deploying service inside WSL2: $($config.Service)" -Color "Yellow"
@@ -572,7 +599,10 @@ $runSetupButton.Add_Click({
                 
                 if (-not $dockerInstalled) {
                     Write-TerminalOutput -Message "Failed to install Docker in WSL2. Skipping service deployment." -Color "Red"
-                    Write-TerminalOutput -Message "You may need to reboot the system and run the setup again." -Color "Yellow"
+                    Write-TerminalOutput -Message "This may indicate WSL2 is not fully ready. Please verify:" -Color "Yellow"
+                    Write-TerminalOutput -Message "  1. The system has been rebooted after WSL2 feature installation" -Color "White"
+                    Write-TerminalOutput -Message "  2. WSL2 Ubuntu distribution is installed and accessible" -Color "White"
+                    Write-TerminalOutput -Message "You can check on the remote system by running: wsl --list --verbose" -Color "Cyan"
                     continue
                 }
                 

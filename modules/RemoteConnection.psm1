@@ -290,14 +290,56 @@ function Invoke-WSLCommand {
         $result = Invoke-Command -Session $session -ScriptBlock {
             param($Cmd, $Distro)
             
-            # First, check if the distribution exists
+            # First, check if WSL is installed and functional
+            try {
+                $wslCheck = & wsl --status 2>&1
+                if ($LASTEXITCODE -ne 0 -or $wslCheck -match "not installed|is not installed") {
+                    return @{
+                        Output = "WSL is not installed or not ready. A system reboot may be required after WSL installation."
+                        ExitCode = 1
+                        WSLNotReady = $true
+                    }
+                }
+            }
+            catch {
+                return @{
+                    Output = "WSL command failed. WSL may not be properly installed."
+                    ExitCode = 1
+                    WSLNotReady = $true
+                }
+            }
+            
+            # Check if the distribution exists
             $distroList = wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
             
-            if ($distroList -notmatch $Distro) {
+            # Handle case where WSL returns error about not being installed
+            if ($distroList -match "not installed|is not installed") {
                 return @{
-                    Output = "Distribution '$Distro' not found. Available distributions: $($distroList -join ', ')"
+                    Output = "WSL is installed but not fully configured. A system reboot may be required."
                     ExitCode = 1
+                    WSLNotReady = $true
                 }
+            }
+            
+            if ($distroList -notmatch $Distro) {
+                # Check for Ubuntu variants if looking for "Ubuntu"
+                $foundDistro = $null
+                if ($Distro -eq "Ubuntu") {
+                    $foundDistro = $distroList | Where-Object { $_ -match "Ubuntu" } | Select-Object -First 1
+                }
+                
+                if (-not $foundDistro) {
+                    $availableDistros = if ($distroList) { $distroList -join ', ' } else { "None installed" }
+                    return @{
+                        Output = "Distribution '$Distro' not found. Available distributions: $availableDistros"
+                        ExitCode = 1
+                        WSLNotReady = $false
+                        DistributionMissing = $true
+                    }
+                }
+                
+                # Use the found Ubuntu variant
+                $Distro = $foundDistro
             }
             
             # Check if distribution is running, if not start it
@@ -314,11 +356,19 @@ function Invoke-WSLCommand {
             return @{
                 Output = $output
                 ExitCode = $LASTEXITCODE
+                WSLNotReady = $false
             }
         } -ArgumentList $Command, $Distribution
         
         # Close the session
         Remove-PSSession -Session $session
+        
+        # Check for WSL not ready condition
+        if ($result.WSLNotReady) {
+            Write-Host "Error: $($result.Output)" -ForegroundColor Red
+            Write-Host "Please ensure the system has been rebooted after WSL2 installation." -ForegroundColor Yellow
+            return $null
+        }
         
         return $result
     }
