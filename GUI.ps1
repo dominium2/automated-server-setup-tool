@@ -3,20 +3,30 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
-#Load modules
-Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
+# Determine script root
+$scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+if (-not $scriptRoot) { $scriptRoot = Get-Location }
+
+# Load modules
+Import-Module (Join-Path $scriptRoot "modules\Logging.psm1") -Force -Scope Global
+Import-Module (Join-Path $scriptRoot "modules\RemoteConnection.psm1") -Force -Scope Global
 
 # Load service modules
-Import-Module "$PSScriptRoot\modules\ServicesDebian\DockerSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\TraefikSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\PortainerSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\AdGuardSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\N8NSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\CraftySetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\HeimdallSetupDebian.psm1" -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\DockerSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\TraefikSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\PortainerSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\AdGuardSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\N8NSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\CraftySetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\HeimdallSetupDebian.psm1") -Force
 
 # Load Windows service modules
-Import-Module "$PSScriptRoot\modules\ServicesWindows\WSL2SetupWindows.psm1" -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesWindows\WSL2SetupWindows.psm1") -Force
+
+# Initialize logging
+$logPath = Initialize-Logging -LogLevel "Info" -LogToFile $true -LogToConsole $false
+Write-SessionSeparator -SessionName "Automated Server Setup Tool"
+Write-LogInfo -Message "Application started" -Component "GUI"
 
 #Gui Design XML
 [xml]$xaml = @"
@@ -404,13 +414,21 @@ $advancedTerminalButton.Add_Click({
 })
 
 $runSetupButton.Add_Click({
+    Write-LogInfo -Message "Run Setup button clicked" -Component "GUI"
+    
     # Collect all server configurations
     $allServerConfigs = Get-AllServerConfigs
+    Write-LogInfo -Message "Collected $($allServerConfigs.Count) server configuration(s)" -Component "GUI"
     
     # Validate configurations
     $validationErrors = Test-ServerConfigs -Configs $allServerConfigs
     
     if ($validationErrors.Count -gt 0) {
+        Write-LogWarning -Message "Validation failed with $($validationErrors.Count) error(s)" -Component "GUI"
+        foreach ($validationError in $validationErrors) {
+            Write-LogWarning -Message "Validation: $validationError" -Component "GUI"
+        }
+        
         # Show validation errors in terminal and message box
         Write-TerminalOutput -Message "" -Color "White"
         Write-TerminalOutput -Message "========== Validation Errors ==========" -Color "Red"
@@ -425,6 +443,8 @@ $runSetupButton.Add_Click({
         return
     }
     
+    Write-LogInfo -Message "Validation passed, starting deployment" -Component "GUI"
+    
     # Display configurations in terminal
     Write-TerminalOutput -Message "" -Color "White"
     Write-TerminalOutput -Message "========== Server Configurations ==========" -Color "Cyan"
@@ -432,6 +452,7 @@ $runSetupButton.Add_Click({
     Write-TerminalOutput -Message "" -Color "White"
     
     foreach ($config in $allServerConfigs) {
+        Write-LogDebug -Message "Server $($config.ServerNumber): IP=$($config.IP), User=$($config.User), Service=$($config.Service)" -Component "GUI"
         Write-TerminalOutput -Message "Server $($config.ServerNumber):" -Color "Yellow"
         Write-TerminalOutput -Message "  IP Address: $($config.IP)" -Color "White"
         Write-TerminalOutput -Message "  User: $($config.User)" -Color "White"
