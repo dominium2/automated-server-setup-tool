@@ -749,49 +749,252 @@ function Show-HealthMonitorWindow {
         return $border
     }
     
-    # Function to refresh health data
+    # Thread-safe queue for health data results
+    $script:healthDataQueue = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
+    $script:healthRefreshInProgress = $false
+    $script:healthRefreshTimer = $null
+    
+    # Function to refresh health data asynchronously
     function Refresh-HealthData {
-        $statusBarText.Text = "Refreshing health data..."
+        if ($script:healthRefreshInProgress) {
+            $statusBarText.Text = "Refresh already in progress..."
+            return
+        }
+        
+        $script:healthRefreshInProgress = $true
+        $refreshButton.IsEnabled = $false
+        $refreshButton.Content = "⏳ Refreshing..."
+        $statusBarText.Text = "Refreshing health data in background..."
+        
+        # Show loading indicators
         $serverHealthPanel.Children.Clear()
         $containerHealthPanel.Children.Clear()
         
-        $healthyCount = 0
-        $warningCount = 0
-        $criticalCount = 0
+        $loadingText = New-Object System.Windows.Controls.TextBlock
+        $loadingText.Text = "Loading server health data..."
+        $loadingText.FontStyle = "Italic"
+        $loadingText.Foreground = [System.Windows.Media.Brushes]::Gray
+        $loadingText.Margin = New-Object System.Windows.Thickness(10)
+        [void]$serverHealthPanel.Children.Add($loadingText)
         
+        $loadingText2 = New-Object System.Windows.Controls.TextBlock
+        $loadingText2.Text = "Loading container health data..."
+        $loadingText2.FontStyle = "Italic"
+        $loadingText2.Foreground = [System.Windows.Media.Brushes]::Gray
+        $loadingText2.Margin = New-Object System.Windows.Thickness(10)
+        [void]$containerHealthPanel.Children.Add($loadingText2)
+        
+        # Clear the queue
+        $tempItem = $null
+        while ($script:healthDataQueue.TryDequeue([ref]$tempItem)) { }
+        
+        # Create runspace pool for parallel health checks
+        $runspacePool = [runspacefactory]::CreateRunspacePool(1, [Math]::Max($ServerConfigs.Count, 1))
+        $runspacePool.Open()
+        
+        $runspaces = @()
+        
+        # Script block that runs in background
+        $healthCheckScript = {
+            param($Config, $OutputQueue, $ModulesPath)
+            
+            # Import modules
+            Import-Module "$ModulesPath\Logging.psm1" -Force -ErrorAction SilentlyContinue
+            Import-Module "$ModulesPath\RemoteConnection.psm1" -Force -ErrorAction SilentlyContinue
+            Import-Module "$ModulesPath\HealthMonitoring.psm1" -Force -ErrorAction SilentlyContinue
+            
+            $serverHealth = $null
+            $containerHealth = $null
+            
+            try {
+                # Get server health
+                $serverHealth = Get-ServerHealth -IP $Config.IP -User $Config.User -Password $Config.Password
+            }
+            catch {
+                $serverHealth = [PSCustomObject]@{
+                    IP = $Config.IP
+                    Status = "Error"
+                    StatusColor = "Red"
+                    ErrorMessage = $_.Exception.Message
+                    LastChecked = Get-Date
+                }
+            }
+            
+            try {
+                # Get container health
+                $containerHealth = Get-ContainerHealth -IP $Config.IP -User $Config.User -Password $Config.Password
+            }
+            catch {
+                $containerHealth = [PSCustomObject]@{
+                    ServerIP = $Config.IP
+                    Status = "Error"
+                    StatusColor = "Red"
+                    TotalContainers = 0
+                    RunningContainers = 0
+                    Containers = @()
+                    ErrorMessage = $_.Exception.Message
+                }
+            }
+            
+            # Queue the results
+            $OutputQueue.Enqueue(@{
+                Type = "HealthData"
+                Config = $Config
+                ServerHealth = $serverHealth
+                ContainerHealth = $containerHealth
+            })
+            
+            return @{
+                IP = $Config.IP
+                ServerHealth = $serverHealth
+                ContainerHealth = $containerHealth
+            }
+        }
+        
+        # Start background jobs for each server
         foreach ($config in $ServerConfigs) {
             if ([string]::IsNullOrWhiteSpace($config.IP)) { continue }
             
-            # Get server health
-            $serverHealth = Get-ServerHealth -IP $config.IP -User $config.User -Password $config.Password
-            $script:lastHealthData[$config.IP] = @{ Server = $serverHealth }
+            $powershell = [powershell]::Create()
+            $powershell.RunspacePool = $runspacePool
             
-            # Create and add server health card
-            $serverCard = New-ServerHealthCard -ServerConfig $config -HealthData $serverHealth
-            [void]$serverHealthPanel.Children.Add($serverCard)
+            [void]$powershell.AddScript($healthCheckScript)
+            [void]$powershell.AddArgument($config)
+            [void]$powershell.AddArgument($script:healthDataQueue)
+            [void]$powershell.AddArgument("$PSScriptRoot\modules")
             
-            # Count statuses
-            switch ($serverHealth.Status) {
-                "Healthy" { $healthyCount++ }
-                "Warning" { $warningCount++ }
-                "Degraded" { $warningCount++ }
-                default { $criticalCount++ }
+            $handle = $powershell.BeginInvoke()
+            
+            $runspaces += @{
+                PowerShell = $powershell
+                Handle = $handle
+                Config = $config
             }
-            
-            # Get container health
-            $containerHealth = Get-ContainerHealth -IP $config.IP -User $config.User -Password $config.Password
-            $script:lastHealthData[$config.IP].Containers = $containerHealth
-            
-            # Create and add container health card
-            $containerCard = New-ContainerHealthCard -ServerIP $config.IP -ContainerData $containerHealth
-            [void]$containerHealthPanel.Children.Add($containerCard)
         }
         
-        # Update summary
-        $summaryText.Text = "Servers: $($ServerConfigs.Count) | ✅ Healthy: $healthyCount | ⚠️ Warning: $warningCount | ❌ Critical: $criticalCount | Last Updated: $(Get-Date -Format 'HH:mm:ss')"
-        $statusBarText.Text = "Ready - Last refresh: $(Get-Date -Format 'HH:mm:ss')"
+        # Store runspace info for the timer
+        $script:healthRunspaces = $runspaces
+        $script:healthRunspacePool = $runspacePool
+        $script:healthResults = @()
         
-        Write-LogInfo -Message "Health data refreshed for $($ServerConfigs.Count) server(s)" -Component "HealthMonitor"
+        # Create timer to poll for completion
+        $script:healthRefreshTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $script:healthRefreshTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+        
+        $script:healthRefreshTimer.Add_Tick({
+            # Process queued results
+            $item = $null
+            while ($script:healthDataQueue.TryDequeue([ref]$item)) {
+                if ($item.Type -eq "HealthData") {
+                    $script:healthResults += $item
+                }
+            }
+            
+            # Check if all runspaces are complete
+            $allComplete = $true
+            foreach ($rs in $script:healthRunspaces) {
+                if (-not $rs.Handle.IsCompleted) {
+                    $allComplete = $false
+                    break
+                }
+            }
+            
+            if ($allComplete) {
+                # Stop timer
+                $script:healthRefreshTimer.Stop()
+                
+                # Collect any remaining results
+                foreach ($rs in $script:healthRunspaces) {
+                    try {
+                        $result = $rs.PowerShell.EndInvoke($rs.Handle)
+                        if ($result -and $result.ServerHealth) {
+                            # Check if we already have this result from queue
+                            $existing = $script:healthResults | Where-Object { $_.Config.IP -eq $result.IP }
+                            if (-not $existing) {
+                                $script:healthResults += @{
+                                    Config = $rs.Config
+                                    ServerHealth = $result.ServerHealth
+                                    ContainerHealth = $result.ContainerHealth
+                                }
+                            }
+                        }
+                    }
+                    catch {
+                        # Add error result
+                        $script:healthResults += @{
+                            Config = $rs.Config
+                            ServerHealth = [PSCustomObject]@{
+                                IP = $rs.Config.IP
+                                Status = "Error"
+                                StatusColor = "Red"
+                                ErrorMessage = $_.Exception.Message
+                            }
+                            ContainerHealth = [PSCustomObject]@{
+                                ServerIP = $rs.Config.IP
+                                Status = "Error"
+                                StatusColor = "Red"
+                                TotalContainers = 0
+                                RunningContainers = 0
+                                Containers = @()
+                            }
+                        }
+                    }
+                    finally {
+                        $rs.PowerShell.Dispose()
+                    }
+                }
+                
+                # Cleanup runspace pool
+                $script:healthRunspacePool.Close()
+                $script:healthRunspacePool.Dispose()
+                
+                # Update UI with results
+                $serverHealthPanel.Children.Clear()
+                $containerHealthPanel.Children.Clear()
+                
+                $healthyCount = 0
+                $warningCount = 0
+                $criticalCount = 0
+                
+                foreach ($result in $script:healthResults) {
+                    # Store in last health data
+                    $script:lastHealthData[$result.Config.IP] = @{
+                        Server = $result.ServerHealth
+                        Containers = $result.ContainerHealth
+                    }
+                    
+                    # Create server health card
+                    $serverCard = New-ServerHealthCard -ServerConfig $result.Config -HealthData $result.ServerHealth
+                    [void]$serverHealthPanel.Children.Add($serverCard)
+                    
+                    # Count statuses
+                    switch ($result.ServerHealth.Status) {
+                        "Healthy" { $healthyCount++ }
+                        "Warning" { $warningCount++ }
+                        "Degraded" { $warningCount++ }
+                        default { $criticalCount++ }
+                    }
+                    
+                    # Create container health card
+                    $containerCard = New-ContainerHealthCard -ServerIP $result.Config.IP -ContainerData $result.ContainerHealth
+                    [void]$containerHealthPanel.Children.Add($containerCard)
+                }
+                
+                # Update summary
+                $summaryText.Text = "Servers: $($ServerConfigs.Count) | ✅ Healthy: $healthyCount | ⚠️ Warning: $warningCount | ❌ Critical: $criticalCount | Last Updated: $(Get-Date -Format 'HH:mm:ss')"
+                $statusBarText.Text = "Ready - Last refresh: $(Get-Date -Format 'HH:mm:ss')"
+                
+                # Re-enable button
+                $refreshButton.IsEnabled = $true
+                $refreshButton.Content = "🔄 Refresh All"
+                $script:healthRefreshInProgress = $false
+                
+                Write-LogInfo -Message "Health data refreshed for $($script:healthResults.Count) server(s)" -Component "HealthMonitor"
+            }
+        })
+        
+        # Start the timer
+        $script:healthRefreshTimer.Start()
     }
     
     # Refresh button click handler
@@ -838,60 +1041,261 @@ function Show-HealthMonitorWindow {
     # Generate report button click handler
     $generateReportButton.Add_Click({
         $reportOutput.Document.Blocks.Clear()
-        Write-ReportOutput -Message "Generating comprehensive health report..." -Color "Cyan"
+        Write-ReportOutput -Message "Generating comprehensive health report in background..." -Color "Cyan"
         Write-ReportOutput -Message "" -Color "White"
         
+        $generateReportButton.IsEnabled = $false
+        $generateReportButton.Content = "Generating..."
+        $statusBarText.Text = "Generating health report..."
+        
+        # Create queue for report output
+        $script:reportQueue = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
+        
+        # Create runspace pool
+        $reportRunspacePool = [runspacefactory]::CreateRunspacePool(1, [Math]::Max($ServerConfigs.Count, 1))
+        $reportRunspacePool.Open()
+        
+        $reportRunspaces = @()
+        
+        # Script for generating report
+        $reportScript = {
+            param($Config, $OutputQueue, $ModulesPath)
+            
+            Import-Module "$ModulesPath\Logging.psm1" -Force -ErrorAction SilentlyContinue
+            Import-Module "$ModulesPath\RemoteConnection.psm1" -Force -ErrorAction SilentlyContinue
+            Import-Module "$ModulesPath\HealthMonitoring.psm1" -Force -ErrorAction SilentlyContinue
+            
+            try {
+                $fullReport = Get-FullHealthReport -IP $Config.IP -User $Config.User -Password $Config.Password
+                $formattedReport = Format-HealthReport -HealthReport $fullReport
+                
+                $OutputQueue.Enqueue(@{
+                    Type = "Report"
+                    IP = $Config.IP
+                    Report = $formattedReport
+                    Success = $true
+                })
+            }
+            catch {
+                $OutputQueue.Enqueue(@{
+                    Type = "Report"
+                    IP = $Config.IP
+                    Report = "Error generating report for $($Config.IP): $($_.Exception.Message)"
+                    Success = $false
+                })
+            }
+        }
+        
+        # Start report generation for each server
         foreach ($config in $ServerConfigs) {
             if ([string]::IsNullOrWhiteSpace($config.IP)) { continue }
             
-            $fullReport = Get-FullHealthReport -IP $config.IP -User $config.User -Password $config.Password
-            $formattedReport = Format-HealthReport -HealthReport $fullReport
+            $powershell = [powershell]::Create()
+            $powershell.RunspacePool = $reportRunspacePool
             
-            foreach ($line in ($formattedReport -split "`n")) {
-                $color = "White"
-                if ($line -match "Healthy|SUCCESS|running") { $color = "Green" }
-                elseif ($line -match "Critical|Error|FAILED|stopped") { $color = "Red" }
-                elseif ($line -match "Warning|Degraded") { $color = "Yellow" }
-                elseif ($line -match "═|─|┌|┐|└|┘|│") { $color = "Cyan" }
-                
-                Write-ReportOutput -Message $line -Color $color
+            [void]$powershell.AddScript($reportScript)
+            [void]$powershell.AddArgument($config)
+            [void]$powershell.AddArgument($script:reportQueue)
+            [void]$powershell.AddArgument("$PSScriptRoot\modules")
+            
+            $handle = $powershell.BeginInvoke()
+            
+            $reportRunspaces += @{
+                PowerShell = $powershell
+                Handle = $handle
             }
-            
-            Write-ReportOutput -Message "" -Color "White"
         }
         
-        Write-ReportOutput -Message "Report generation complete." -Color "Cyan"
-        $statusBarText.Text = "Full health report generated"
+        # Store for timer
+        $script:reportRunspaces = $reportRunspaces
+        $script:reportRunspacePool = $reportRunspacePool
+        
+        # Timer to poll for completion
+        $script:reportTimer = New-Object System.Windows.Threading.DispatcherTimer
+        $script:reportTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+        
+        $script:reportTimer.Add_Tick({
+            # Process queued reports
+            $item = $null
+            while ($script:reportQueue.TryDequeue([ref]$item)) {
+                if ($item.Type -eq "Report") {
+                    foreach ($line in ($item.Report -split "`n")) {
+                        $color = "White"
+                        if ($line -match "Healthy|SUCCESS|running") { $color = "Green" }
+                        elseif ($line -match "Critical|Error|FAILED|stopped") { $color = "Red" }
+                        elseif ($line -match "Warning|Degraded") { $color = "Yellow" }
+                        elseif ($line -match "═|─|┌|┐|└|┘|│") { $color = "Cyan" }
+                        
+                        Write-ReportOutput -Message $line -Color $color
+                    }
+                    Write-ReportOutput -Message "" -Color "White"
+                }
+            }
+            
+            # Check if complete
+            $allComplete = $true
+            foreach ($rs in $script:reportRunspaces) {
+                if (-not $rs.Handle.IsCompleted) {
+                    $allComplete = $false
+                    break
+                }
+            }
+            
+            if ($allComplete) {
+                $script:reportTimer.Stop()
+                
+                # Cleanup
+                foreach ($rs in $script:reportRunspaces) {
+                    try { $rs.PowerShell.EndInvoke($rs.Handle) } catch { }
+                    $rs.PowerShell.Dispose()
+                }
+                
+                $script:reportRunspacePool.Close()
+                $script:reportRunspacePool.Dispose()
+                
+                Write-ReportOutput -Message "Report generation complete." -Color "Cyan"
+                $generateReportButton.IsEnabled = $true
+                $generateReportButton.Content = "Generate Full Report"
+                $statusBarText.Text = "Full health report generated"
+            }
+        })
+        
+        $script:reportTimer.Start()
     })
     
     # Export report button click handler
     $exportReportButton.Add_Click({
+        # Use cached data if available, otherwise show message
+        if ($script:lastHealthData.Count -eq 0) {
+            [System.Windows.MessageBox]::Show("Please refresh health data first before exporting.", "No Data", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            return
+        }
+        
         $saveDialog = New-Object Microsoft.Win32.SaveFileDialog
         $saveDialog.Filter = "Text files (*.txt)|*.txt|All files (*.*)|*.*"
         $saveDialog.DefaultExt = ".txt"
         $saveDialog.FileName = "health-report_$(Get-Date -Format 'yyyy-MM-dd_HHmmss').txt"
         
         if ($saveDialog.ShowDialog() -eq $true) {
-            $reportContent = @()
+            $exportReportButton.IsEnabled = $false
+            $exportReportButton.Content = "Exporting..."
+            $statusBarText.Text = "Exporting report..."
+            
+            # Create queue for export
+            $script:exportQueue = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
+            
+            # Create runspace pool
+            $exportRunspacePool = [runspacefactory]::CreateRunspacePool(1, [Math]::Max($ServerConfigs.Count, 1))
+            $exportRunspacePool.Open()
+            
+            $exportRunspaces = @()
+            
+            $exportScript = {
+                param($Config, $OutputQueue, $ModulesPath)
+                
+                Import-Module "$ModulesPath\Logging.psm1" -Force -ErrorAction SilentlyContinue
+                Import-Module "$ModulesPath\RemoteConnection.psm1" -Force -ErrorAction SilentlyContinue
+                Import-Module "$ModulesPath\HealthMonitoring.psm1" -Force -ErrorAction SilentlyContinue
+                
+                try {
+                    $fullReport = Get-FullHealthReport -IP $Config.IP -User $Config.User -Password $Config.Password
+                    $formattedReport = Format-HealthReport -HealthReport $fullReport
+                    
+                    $OutputQueue.Enqueue(@{
+                        Type = "ExportData"
+                        Report = $formattedReport
+                    })
+                }
+                catch {
+                    $OutputQueue.Enqueue(@{
+                        Type = "ExportData"
+                        Report = "Error: $($_.Exception.Message)"
+                    })
+                }
+            }
+            
             foreach ($config in $ServerConfigs) {
                 if ([string]::IsNullOrWhiteSpace($config.IP)) { continue }
                 
-                $fullReport = Get-FullHealthReport -IP $config.IP -User $config.User -Password $config.Password
-                $formattedReport = Format-HealthReport -HealthReport $fullReport
-                $reportContent += $formattedReport
-                $reportContent += ""
+                $powershell = [powershell]::Create()
+                $powershell.RunspacePool = $exportRunspacePool
+                
+                [void]$powershell.AddScript($exportScript)
+                [void]$powershell.AddArgument($config)
+                [void]$powershell.AddArgument($script:exportQueue)
+                [void]$powershell.AddArgument("$PSScriptRoot\modules")
+                
+                $handle = $powershell.BeginInvoke()
+                
+                $exportRunspaces += @{
+                    PowerShell = $powershell
+                    Handle = $handle
+                }
             }
             
-            $reportContent | Out-File -FilePath $saveDialog.FileName -Encoding UTF8
-            $statusBarText.Text = "Report exported to: $($saveDialog.FileName)"
-            [System.Windows.MessageBox]::Show("Health report exported successfully!", "Export Complete", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+            $script:exportRunspaces = $exportRunspaces
+            $script:exportRunspacePool = $exportRunspacePool
+            $script:exportContent = @()
+            $script:exportFilePath = $saveDialog.FileName
+            
+            $script:exportTimer = New-Object System.Windows.Threading.DispatcherTimer
+            $script:exportTimer.Interval = [TimeSpan]::FromMilliseconds(200)
+            
+            $script:exportTimer.Add_Tick({
+                $item = $null
+                while ($script:exportQueue.TryDequeue([ref]$item)) {
+                    if ($item.Type -eq "ExportData") {
+                        $script:exportContent += $item.Report
+                        $script:exportContent += ""
+                    }
+                }
+                
+                $allComplete = $true
+                foreach ($rs in $script:exportRunspaces) {
+                    if (-not $rs.Handle.IsCompleted) {
+                        $allComplete = $false
+                        break
+                    }
+                }
+                
+                if ($allComplete) {
+                    $script:exportTimer.Stop()
+                    
+                    foreach ($rs in $script:exportRunspaces) {
+                        try { $rs.PowerShell.EndInvoke($rs.Handle) } catch { }
+                        $rs.PowerShell.Dispose()
+                    }
+                    
+                    $script:exportRunspacePool.Close()
+                    $script:exportRunspacePool.Dispose()
+                    
+                    # Write to file
+                    $script:exportContent | Out-File -FilePath $script:exportFilePath -Encoding UTF8
+                    
+                    $exportReportButton.IsEnabled = $true
+                    $exportReportButton.Content = "Export Report"
+                    $statusBarText.Text = "Report exported to: $($script:exportFilePath)"
+                    [System.Windows.MessageBox]::Show("Health report exported successfully!", "Export Complete", [System.Windows.MessageBoxButton]::OK, [System.Windows.MessageBoxImage]::Information)
+                }
+            })
+            
+            $script:exportTimer.Start()
         }
     })
     
-    # Window closing handler - cleanup timer
+    # Window closing handler - cleanup timers
     $healthWindow.Add_Closing({
         if ($script:autoRefreshTimer) {
             $script:autoRefreshTimer.Stop()
+        }
+        if ($script:healthRefreshTimer) {
+            $script:healthRefreshTimer.Stop()
+        }
+        if ($script:reportTimer) {
+            $script:reportTimer.Stop()
+        }
+        if ($script:exportTimer) {
+            $script:exportTimer.Stop()
         }
     })
     

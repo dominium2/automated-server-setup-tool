@@ -74,3 +74,26 @@
 [2026-01-01 19:31:44.711] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
 [2026-01-01 19:32:08.194] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
 [2026-01-01 19:32:33.100] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:32:56.041] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:33:19.079] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:33:43.726] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:34:07.353] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:36:23.943] [Info] [Logging] Logging initialized
+
+================================================================================
+=== Automated Server Setup Tool - 2026-01-01 19:36:23
+================================================================================
+
+[2026-01-01 19:36:23.963] [Info] [GUI] Application started
+[2026-01-01 19:36:31.385] [Info] [Logging] Logging initialized
+
+================================================================================
+=== Automated Server Setup Tool - 2026-01-01 19:36:31
+================================================================================
+
+[2026-01-01 19:36:31.405] [Info] [GUI] Application started
+[2026-01-01 19:36:55.773] [Info] [GUI] Health Monitor button clicked
+[2026-01-01 19:36:55.790] [Info] [HealthMonitor] Opening Health Monitor window
+[2026-01-01 19:38:05.118] [Info] [GUI] Health Monitor button clicked
+[2026-01-01 19:38:05.132] [Info] [HealthMonitor] Opening Health Monitor window
+[2026-01-01 19:46:42.631] [Info] [HealthMonitor] Health data refreshed for 1 server(s)
