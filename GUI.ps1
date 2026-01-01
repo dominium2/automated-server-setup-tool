@@ -39,6 +39,9 @@ Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
         <StackPanel Grid.Row="2" Orientation="Horizontal" Margin="0,10,0,5">
             <Label Content="Terminal Output" FontWeight="Bold" FontSize="14" VerticalAlignment="Center"/>
             <Button Name="ClearOutputButton" Content="Clear" Width="80" Height="25" Margin="10,0,0,0"/>
+            <Label Content="Mode:" FontWeight="Bold" FontSize="12" VerticalAlignment="Center" Margin="20,0,5,0"/>
+            <Button Name="SimpleTerminalButton" Content="Simple" Width="80" Height="25" Margin="0,0,5,0" Background="#4A90E2" Foreground="White"/>
+            <Button Name="AdvancedTerminalButton" Content="Advanced" Width="80" Height="25" Margin="0,0,0,0"/>
         </StackPanel>
         
         <!-- Terminal Output Display -->
@@ -62,6 +65,7 @@ Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
 # Initialize server counter and storage
 $script:serverCount = 0
 $script:serverControls = @()  # Store references to all server controls
+$script:terminalMode = "Simple"  # Default terminal mode: Simple or Advanced
 
 # Function to write colored output to the terminal
 function Write-TerminalOutput {
@@ -74,6 +78,14 @@ function Write-TerminalOutput {
         $paragraph = New-Object System.Windows.Documents.Paragraph
         $paragraph.Margin = New-Object System.Windows.Thickness(0)
         
+        # In Advanced mode, add timestamp prefix
+        if ($script:terminalMode -eq "Advanced" -and $Message -ne "") {
+            $timestamp = Get-Date -Format "HH:mm:ss"
+            $timeRun = New-Object System.Windows.Documents.Run("[$timestamp] ")
+            $timeRun.Foreground = [System.Windows.Media.Brushes]::DarkGray
+            $paragraph.Inlines.Add($timeRun)
+        }
+        
         $run = New-Object System.Windows.Documents.Run($Message)
         
         switch ($Color) {
@@ -85,7 +97,7 @@ function Write-TerminalOutput {
             "Gray" { $run.Foreground = [System.Windows.Media.Brushes]::Gray }
             default { $run.Foreground = [System.Windows.Media.Brushes]::White }
         }
-        
+    
         $paragraph.Inlines.Add($run)
         $script:terminalOutput.Document.Blocks.Add($paragraph)
         $script:terminalOutput.ScrollToEnd()
@@ -318,7 +330,28 @@ $addServerButton = $window.FindName("AddServerButton")
 $runSetupButton = $window.FindName("RunSetupButton")
 $serverContainer = $window.FindName("ServerContainer")
 $clearOutputButton = $window.FindName("ClearOutputButton")
+$simpleTerminalButton = $window.FindName("SimpleTerminalButton")
+$advancedTerminalButton = $window.FindName("AdvancedTerminalButton")
 $script:terminalOutput = $window.FindName("TerminalOutput")
+
+# Function to update terminal mode button styles
+function Update-TerminalModeButtons {
+    $brushConverter = New-Object System.Windows.Media.BrushConverter
+    if ($script:terminalMode -eq "Simple") {
+        $simpleTerminalButton.Background = $brushConverter.ConvertFromString("#4A90E2")
+        $simpleTerminalButton.Foreground = [System.Windows.Media.Brushes]::White
+        $advancedTerminalButton.Background = $brushConverter.ConvertFromString("#F0F0F0")
+        $advancedTerminalButton.Foreground = [System.Windows.Media.Brushes]::Black
+    } else {
+        $simpleTerminalButton.Background = $brushConverter.ConvertFromString("#F0F0F0")
+        $simpleTerminalButton.Foreground = [System.Windows.Media.Brushes]::Black
+        $advancedTerminalButton.Background = $brushConverter.ConvertFromString("#4A90E2")
+        $advancedTerminalButton.Foreground = [System.Windows.Media.Brushes]::White
+    }
+}
+
+# Initialize button styles
+Update-TerminalModeButtons
 
 # Add first server box on startup
 Add-ServerBox
@@ -336,6 +369,26 @@ $addServerButton.Add_Click({
 $clearOutputButton.Add_Click({
     $script:terminalOutput.Document.Blocks.Clear()
     Write-TerminalOutput -Message "Terminal cleared." -Color "Gray"
+})
+
+$simpleTerminalButton.Add_Click({
+    if ($script:terminalMode -ne "Simple") {
+        $script:terminalMode = "Simple"
+        Update-TerminalModeButtons
+        Write-TerminalOutput -Message "Switched to Simple terminal mode" -Color "Cyan"
+        Write-TerminalOutput -Message "Output will be displayed without timestamps." -Color "Gray"
+        Write-TerminalOutput -Message "" -Color "White"
+    }
+})
+
+$advancedTerminalButton.Add_Click({
+    if ($script:terminalMode -ne "Advanced") {
+        $script:terminalMode = "Advanced"
+        Update-TerminalModeButtons
+        Write-TerminalOutput -Message "Switched to Advanced terminal mode" -Color "Cyan"
+        Write-TerminalOutput -Message "Output will include timestamps and verbose details." -Color "Gray"
+        Write-TerminalOutput -Message "" -Color "White"
+    }
 })
 
 $runSetupButton.Add_Click({
@@ -389,7 +442,7 @@ $runSetupButton.Add_Click({
         if ($connectionSuccess) {
             Write-TerminalOutput -Message "Successfully connected to $($config.IP)" -Color "Green"
             Write-TerminalOutput -Message "Deploying service: $($config.Service)" -Color "Yellow"
-            
+                
             # TODO: Add service deployment logic here
             # Example: Deploy-Service -Config $config
         }
