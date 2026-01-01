@@ -3,27 +3,30 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 
-#Load modules
-Import-Module "$PSScriptRoot\modules\Logging.psm1" -Force
-Import-Module "$PSScriptRoot\modules\RemoteConnection.psm1" -Force
+# Determine script root
+$scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
+if (-not $scriptRoot) { $scriptRoot = Get-Location }
+
+# Load modules
+Import-Module (Join-Path $scriptRoot "modules\Logging.psm1") -Force -Scope Global
+Import-Module (Join-Path $scriptRoot "modules\RemoteConnection.psm1") -Force -Scope Global
 
 # Load service modules
-Import-Module "$PSScriptRoot\modules\ServicesDebian\DockerSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\TraefikSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\PortainerSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\AdGuardSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\N8NSetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\CraftySetupDebian.psm1" -Force
-Import-Module "$PSScriptRoot\modules\ServicesDebian\HeimdallSetupDebian.psm1" -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\DockerSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\TraefikSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\PortainerSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\AdGuardSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\N8NSetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\CraftySetupDebian.psm1") -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\HeimdallSetupDebian.psm1") -Force
 
 # Load Windows service modules
-Import-Module "$PSScriptRoot\modules\ServicesWindows\WSL2SetupWindows.psm1" -Force
+Import-Module (Join-Path $scriptRoot "modules\ServicesWindows\WSL2SetupWindows.psm1") -Force
 
 # Initialize logging
-$logPath = Initialize-Logging -LogLevel "Debug" -LogToFile $true -LogToConsole $false
+$logPath = Initialize-Logging -LogLevel "Info" -LogToFile $true -LogToConsole $false
 Write-SessionSeparator -SessionName "Automated Server Setup Tool"
 Write-LogInfo -Message "Application started" -Component "GUI"
-Write-LogInfo -Message "Log file: $logPath" -Component "GUI"
 
 #Gui Design XML
 [xml]$xaml = @"

@@ -1,7 +1,9 @@
 #This file handles the remote connection to the target machines
 
-# Import logging module
-Import-Module "$PSScriptRoot\Logging.psm1" -Force -ErrorAction SilentlyContinue
+# Import logging module if not already loaded
+if (-not (Get-Command Write-LogInfo -ErrorAction SilentlyContinue)) {
+    Import-Module (Join-Path $PSScriptRoot "Logging.psm1") -Force -Scope Global -ErrorAction SilentlyContinue
+}
 
 function Get-TargetOS {
     param (
