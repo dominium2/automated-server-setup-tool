@@ -61,7 +61,7 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ### Quick Start
 
-1. Launch the tool
+1. Launch the tool by running GUI.ps1
 
 2. Click **"Add Service"** to create a new server configuration tab
 
@@ -73,6 +73,63 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 4. Repeat for additional servers (you can deploy multiple services to the same IP)
 
 5. Click **"Run"** to start automated deployment
+
+### Testing with Vagrant
+
+A `Vagrantfile` is included to quickly spin up test virtual machines for development and testing purposes.
+
+#### Prerequisites for Vagrant
+
+- [Vagrant](https://www.vagrantup.com/downloads) installed
+- [VirtualBox](https://www.virtualbox.org/wiki/Downloads) installed
+
+#### Available VMs
+
+| VM Name | OS | IP Address | Memory | CPUs |
+|---------|-----|------------|--------|------|
+| linux1 | Debian 11 (Bullseye) | 192.168.56.11 | 1024 MB | 1 |
+| linux2 | Debian 11 (Bullseye) | 192.168.56.12 | 1024 MB | 1 |
+| windows1 | Windows 11 | 192.168.56.21 | 2048 MB | 2 |
+| windows2 | Windows 11 | 192.168.56.22 | 2048 MB | 2 |
+
+#### Test Credentials
+
+All VMs are provisioned with the following test user:
+- **Username**: `testuser`
+- **Password**: `testpass123`
+
+#### Common Vagrant Commands
+
+```powershell
+# Start all VMs
+vagrant up
+
+# Start a specific VM (e.g., linux1)
+vagrant up linux1
+
+# Check VM status
+vagrant status
+
+# SSH into a Linux VM
+vagrant ssh linux1
+
+# Stop all VMs
+vagrant halt
+
+# Stop a specific VM
+vagrant halt linux1
+
+# Destroy all VMs (removes them completely)
+vagrant destroy
+
+# Destroy a specific VM
+vagrant destroy linux1 -f
+
+# Reprovision a VM (re-run provisioning scripts)
+vagrant provision linux1
+```
+
+> ⚠️ **Note**: Windows VMs are provided for reference but will not work for Docker deployment due to WSL2 limitations in VMs. Use Linux VMs for testing the full deployment workflow.
 
 ## How It Works
 
