@@ -7,24 +7,13 @@ Add-Type -AssemblyName WindowsBase
 $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 if (-not $scriptRoot) { $scriptRoot = Get-Location }
 
-# Load modules
-Import-Module (Join-Path $scriptRoot "modules\Logging.psm1") -Force -Scope Global
-Import-Module (Join-Path $scriptRoot "modules\RemoteConnection.psm1") -Force -Scope Global
-
-# Load health monitoring module
-Import-Module (Join-Path $scriptRoot "modules\HealthMonitoring.psm1") -Force -Scope Global
-
-# Load service modules
-Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\DockerSetupDebian.psm1") -Force
-Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\TraefikSetupDebian.psm1") -Force
-Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\PortainerSetupDebian.psm1") -Force
-Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\AdGuardSetupDebian.psm1") -Force
-Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\N8NSetupDebian.psm1") -Force
-Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\CraftySetupDebian.psm1") -Force
-Import-Module (Join-Path $scriptRoot "modules\ServicesDebian\HeimdallSetupDebian.psm1") -Force
-
-# Load Windows service modules
-Import-Module (Join-Path $scriptRoot "modules\ServicesWindows\WSL2SetupWindows.psm1") -Force
+# Load the consolidated RMSetup module (contains all functionality)
+# - Logging functions
+# - Remote connection functions (SSH, WinRM, WSL)
+# - Health monitoring functions
+# - Service installation functions (Docker, Traefik, Portainer, AdGuard, N8N, Crafty, Heimdall)
+# - WSL2 setup functions for Windows
+Import-Module (Join-Path $scriptRoot "modules\RMSetup.psm1") -Force -Scope Global
 
 # Initialize logging
 $logPath = Initialize-Logging -LogLevel "Info" -LogToFile $true -LogToConsole $false
