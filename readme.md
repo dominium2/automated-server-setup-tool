@@ -92,6 +92,13 @@ The tool follows a modular design pattern:
 
 This separation ensures maintainability, testability, and extensibility.
 
+## Documentation
+
+Code documentation is available in the `docs/` folder:
+
+- **[GUI.md](docs/GUI.md)** - Documentation for the GUI.ps1 main application
+- **[RMSetup.md](docs/RMSetup.md)** - Documentation for the RMSetup.psm1 module
+
 ## Testing
 - Input validation
 - OS detection logic
@@ -155,10 +162,6 @@ Contributions are welcome! Please follow these steps:
 4. Ensure all tests pass (`Invoke-Pester`)
 5. Submit a Pull Request
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
 ## Author
 
 **dominium2**
@@ -168,7 +171,3 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 - Built with PowerShell and WPF
 - Docker and Docker Compose for containerization
 - Traefik for reverse proxy functionality
-
-## Support
-
-For issues, questions, or contributions, please open an issue on the GitHub repository.
