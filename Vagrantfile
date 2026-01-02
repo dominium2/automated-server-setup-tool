@@ -10,8 +10,10 @@ Vagrant.configure("2") do |config|
       server.vm.hostname = "linux#{i}"
       server.vm.network "private_network", ip: "192.168.56.#{10+i}"
       
+      # Capture i in local variable for provider block
+      vm_name = "HomeLab-Linux#{i}"
       server.vm.provider "virtualbox" do |vb|
-        vb.name = "HomeLab-Linux#{i}"
+        vb.name = vm_name
         vb.memory = "1024"
         vb.cpus = 1
       end
@@ -57,8 +59,10 @@ Vagrant.configure("2") do |config|
       # Increase boot timeout for Windows VMs
       server.vm.boot_timeout = 600
       
+      # Capture i in local variable for provider block
+      vm_name = "HomeLab-Windows#{i}"
       server.vm.provider "virtualbox" do |vb|
-        vb.name = "HomeLab-Windows#{i}"
+        vb.name = vm_name
         vb.memory = "4096"
         vb.cpus = 2
         vb.gui = false
