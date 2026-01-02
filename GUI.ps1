@@ -1308,6 +1308,10 @@ Add-ServerBox
 Write-TerminalOutput -Message "Welcome to Automated Home Lab Setup" -Color "Cyan"
 Write-TerminalOutput -Message "Add servers and click 'Run Setup' to begin deployment." -Color "Gray"
 Write-TerminalOutput -Message "" -Color "White"
+Write-TerminalOutput -Message "Terminal Modes:" -Color "Yellow"
+Write-TerminalOutput -Message "  Simple   - Shows major status updates only" -Color "Gray"
+Write-TerminalOutput -Message "  Advanced - Shows all setup details (SSH commands, Docker output)" -Color "Gray"
+Write-TerminalOutput -Message "" -Color "White"
 
 $addServerButton.Add_Click({
     Add-ServerBox
@@ -1324,7 +1328,7 @@ $simpleTerminalButton.Add_Click({
         $script:terminalMode = "Simple"
         Update-TerminalModeButtons
         Write-TerminalOutput -Message "Switched to Simple terminal mode" -Color "Cyan"
-        Write-TerminalOutput -Message "Output will be displayed without timestamps." -Color "Gray"
+        Write-TerminalOutput -Message "Shows: Major status updates, success/failure messages" -Color "Gray"
         Write-TerminalOutput -Message "" -Color "White"
     }
 })
@@ -1334,7 +1338,8 @@ $advancedTerminalButton.Add_Click({
         $script:terminalMode = "Advanced"
         Update-TerminalModeButtons
         Write-TerminalOutput -Message "Switched to Advanced terminal mode" -Color "Cyan"
-        Write-TerminalOutput -Message "Output will include timestamps and verbose details." -Color "Gray"
+        Write-TerminalOutput -Message "Shows: All setup steps, SSH commands, Docker output, timestamps" -Color "Gray"
+        Write-TerminalOutput -Message "Tip: Use this mode to troubleshoot deployment issues" -Color "Yellow"
         Write-TerminalOutput -Message "" -Color "White"
     }
 })
@@ -1422,6 +1427,15 @@ $runSetupButton.Add_Click({
     Write-TerminalOutput -Message "Deploying to $($allServerConfigs.Count) server(s) simultaneously..." -Color "Cyan"
     Write-TerminalOutput -Message "" -Color "White"
     
+    # Show terminal mode info
+    if ($script:terminalMode -eq "Advanced") {
+        Write-TerminalOutput -Message "Terminal Mode: ADVANCED - Showing all setup details" -Color "Magenta"
+    } else {
+        Write-TerminalOutput -Message "Terminal Mode: SIMPLE - Showing major updates only" -Color "Gray"
+        Write-TerminalOutput -Message "Tip: Switch to 'Advanced' mode to see detailed setup progress" -Color "Gray"
+    }
+    Write-TerminalOutput -Message "" -Color "White"
+    
     # Disable the Run Setup button during deployment
     $runSetupButton.IsEnabled = $false
     $runSetupButton.Content = "Deploying..."
@@ -1441,12 +1455,17 @@ $runSetupButton.Add_Click({
         param(
             $Config,
             $OutputQueue,
-            $ModulesPath
+            $ModulesPath,
+            $TerminalMode
         )
         
         # Helper function to queue output messages
         function Send-Output {
-            param([string]$Message, [string]$Color = "White", [int]$ServerNum)
+            param([string]$Message, [string]$Color = "White", [int]$ServerNum, [switch]$AdvancedOnly)
+            # If AdvancedOnly is set, only show in Advanced mode
+            if ($AdvancedOnly -and $TerminalMode -ne "Advanced") {
+                return
+            }
             $OutputQueue.Enqueue(@{
                 Message = $Message
                 Color = $Color
@@ -1454,7 +1473,112 @@ $runSetupButton.Add_Click({
             })
         }
         
+        # Helper function to capture and forward Write-Host output from module functions
+        # This function captures the Information stream (Write-Host output) and Error stream
+        function Invoke-WithOutput {
+            param(
+                [scriptblock]$ScriptBlock,
+                [int]$ServerNum
+            )
+            
+            # Use a StringWriter to capture console output
+            $previousHost = $Host
+            $infoRecords = @()
+            
+            # Execute with information capture using -InformationVariable
+            # We'll use a wrapper that captures Write-Host via 6>&1
+            $capturedOutput = $null
+            $errorOutput = $null
+            
+            try {
+                # Redirect Information stream (6) to output and capture everything
+                $capturedOutput = & {
+                    & $ScriptBlock *>&1
+                } 6>&1 2>&1
+            }
+            catch {
+                $errorOutput = $_.Exception.Message
+            }
+            
+            # Process captured output
+            if ($capturedOutput) {
+                foreach ($item in $capturedOutput) {
+                    if ($null -eq $item) { continue }
+                    
+                    $message = $null
+                    $messageColor = "Gray"
+                    
+                    # Handle different output types
+                    if ($item -is [System.Management.Automation.InformationRecord]) {
+                        $message = $item.MessageData.ToString()
+                        # Try to get foreground color from InformationRecord
+                        if ($item.Tags -contains "PSHOST") {
+                            $fgColor = $item.MessageData.ForegroundColor
+                            if ($fgColor) {
+                                switch ($fgColor.ToString()) {
+                                    "Green" { $messageColor = "Green" }
+                                    "Red" { $messageColor = "Red" }
+                                    "Yellow" { $messageColor = "Yellow" }
+                                    "Cyan" { $messageColor = "Cyan" }
+                                    "Magenta" { $messageColor = "Magenta" }
+                                    "Gray" { $messageColor = "Gray" }
+                                    default { $messageColor = "White" }
+                                }
+                            }
+                        }
+                    }
+                    elseif ($item -is [System.Management.Automation.ErrorRecord]) {
+                        $message = $item.Exception.Message
+                        $messageColor = "Red"
+                    }
+                    elseif ($item -is [System.Management.Automation.HostInformationMessage]) {
+                        $message = $item.Message
+                        # Get color from the HostInformationMessage
+                        if ($item.ForegroundColor) {
+                            switch ($item.ForegroundColor.ToString()) {
+                                "Green" { $messageColor = "Green" }
+                                "Red" { $messageColor = "Red" }
+                                "Yellow" { $messageColor = "Yellow" }
+                                "Cyan" { $messageColor = "Cyan" }
+                                "Magenta" { $messageColor = "Magenta" }
+                                "Gray" { $messageColor = "Gray" }
+                                default { $messageColor = "White" }
+                            }
+                        }
+                    }
+                    else {
+                        $message = $item.ToString()
+                    }
+                    
+                    if ([string]::IsNullOrWhiteSpace($message)) { continue }
+                    
+                    # Auto-detect color from content if not already set to a specific color
+                    if ($messageColor -eq "Gray" -or $messageColor -eq "White") {
+                        if ($message -match "error|fail|denied|cannot") { $messageColor = "Red" }
+                        elseif ($message -match "success|installed|complete|ready|running") { $messageColor = "Green" }
+                        elseif ($message -match "warning|skip|already") { $messageColor = "Yellow" }
+                        elseif ($message -match "starting|checking|creating|deploying|installing|verifying|updating|detecting|setting") { $messageColor = "Cyan" }
+                    }
+                    
+                    # In Advanced mode, show all output; in Simple mode, only show important messages
+                    if ($TerminalMode -eq "Advanced") {
+                        Send-Output -Message "    $message" -Color $messageColor -ServerNum $ServerNum
+                    }
+                    elseif ($message -match "success|fail|error|complete|installed|deployed|running|ready") {
+                        Send-Output -Message "    $message" -Color $messageColor -ServerNum $ServerNum
+                    }
+                }
+            }
+            
+            # Handle any captured errors
+            if ($errorOutput) {
+                Send-Output -Message "    Error: $errorOutput" -Color "Red" -ServerNum $ServerNum
+            }
+        }
+        
         # Import modules in the runspace
+        # Import logging first as other modules may depend on it
+        Import-Module "$ModulesPath\Logging.psm1" -Force -ErrorAction SilentlyContinue
         Import-Module "$ModulesPath\RemoteConnection.psm1" -Force
         Import-Module "$ModulesPath\ServicesDebian\DockerSetupDebian.psm1" -Force
         Import-Module "$ModulesPath\ServicesDebian\TraefikSetupDebian.psm1" -Force
@@ -1469,7 +1593,11 @@ $runSetupButton.Add_Click({
         Send-Output -Message "[Server $serverNum] Starting deployment to $($Config.IP)..." -Color "Cyan" -ServerNum $serverNum
         
         # Test connection to the server
-        $connectionResult = Test-RemoteConnection -IP $Config.IP -User $Config.User -Password $Config.Password
+        Send-Output -Message "[Server $serverNum] Testing connection..." -Color "Cyan" -ServerNum $serverNum -AdvancedOnly
+        Invoke-WithOutput -ScriptBlock {
+            $script:connectionResult = Test-RemoteConnection -IP $Config.IP -User $Config.User -Password $Config.Password
+        } -ServerNum $serverNum
+        $connectionResult = $script:connectionResult
         
         if (-not $connectionResult) {
             Send-Output -Message "[Server $serverNum] Failed to connect to $($Config.IP). Skipping..." -Color "Red" -ServerNum $serverNum
@@ -1479,7 +1607,11 @@ $runSetupButton.Add_Click({
         Send-Output -Message "[Server $serverNum] Successfully connected to $($Config.IP)" -Color "Green" -ServerNum $serverNum
         
         # Get the OS type
-        $osType = Get-TargetOS -IP $Config.IP
+        Send-Output -Message "[Server $serverNum] Detecting operating system..." -Color "Cyan" -ServerNum $serverNum -AdvancedOnly
+        Invoke-WithOutput -ScriptBlock {
+            $script:osType = Get-TargetOS -IP $Config.IP
+        } -ServerNum $serverNum
+        $osType = $script:osType
         Send-Output -Message "[Server $serverNum] Detected OS: $osType" -Color "Cyan" -ServerNum $serverNum
         
         # Deploy service based on OS
@@ -1488,16 +1620,25 @@ $runSetupButton.Add_Click({
             
             # Install Docker first (required for all services)
             Send-Output -Message "[Server $serverNum] Ensuring Docker is installed..." -Color "Cyan" -ServerNum $serverNum
-            $dockerInstalled = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password
+            $dockerInstalled = $null
+            Invoke-WithOutput -ScriptBlock {
+                $script:dockerInstalled = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password
+            } -ServerNum $serverNum
+            $dockerInstalled = $script:dockerInstalled
             
             if (-not $dockerInstalled) {
                 Send-Output -Message "[Server $serverNum] Failed to install Docker. Skipping service deployment." -Color "Red" -ServerNum $serverNum
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
             }
+            Send-Output -Message "[Server $serverNum] Docker is ready" -Color "Green" -ServerNum $serverNum
             
             # Install Traefik
             Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy..." -Color "Cyan" -ServerNum $serverNum
-            $traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+            $traefikSuccess = $null
+            Invoke-WithOutput -ScriptBlock {
+                $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+            } -ServerNum $serverNum
+            $traefikSuccess = $script:traefikSuccess
             
             if ($traefikSuccess) {
                 Send-Output -Message "[Server $serverNum] Traefik installed successfully" -Color "Green" -ServerNum $serverNum
@@ -1512,7 +1653,10 @@ $runSetupButton.Add_Click({
             $serviceSuccess = $false
             switch ($Config.Service) {
                 "Portainer" {
-                    $serviceSuccess = Install-Portainer -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-Portainer -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] Portainer deployed successfully" -Color "Green" -ServerNum $serverNum
                     }
@@ -1521,7 +1665,10 @@ $runSetupButton.Add_Click({
                     }
                 }
                 "AdGuard" {
-                    $serviceSuccess = Install-AdGuard -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-AdGuard -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] AdGuard deployed successfully" -Color "Green" -ServerNum $serverNum
                     }
@@ -1530,7 +1677,10 @@ $runSetupButton.Add_Click({
                     }
                 }
                 "N8N" {
-                    $serviceSuccess = Install-N8N -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-N8N -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] n8n deployed successfully" -Color "Green" -ServerNum $serverNum
                     }
@@ -1539,7 +1689,10 @@ $runSetupButton.Add_Click({
                     }
                 }
                 "Heimdall" {
-                    $serviceSuccess = Install-Heimdall -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-Heimdall -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] Heimdall deployed successfully" -Color "Green" -ServerNum $serverNum
                     }
@@ -1548,7 +1701,10 @@ $runSetupButton.Add_Click({
                     }
                 }
                 "Crafty" {
-                    $serviceSuccess = Install-Crafty -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-Crafty -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] Crafty deployed successfully" -Color "Green" -ServerNum $serverNum
                     }
@@ -1569,7 +1725,10 @@ $runSetupButton.Add_Click({
             
             # Step 1: Install WSL2 first (with automatic reboot if needed)
             Send-Output -Message "[Server $serverNum] Step 1: Installing WSL2 (required for containerized services)..." -Color "Cyan" -ServerNum $serverNum
-            $wsl2Result = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -Distribution "Ubuntu" -AutoReboot -WaitForReboot
+            Invoke-WithOutput -ScriptBlock {
+                $script:wsl2Result = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -Distribution "Ubuntu" -AutoReboot -WaitForReboot
+            } -ServerNum $serverNum
+            $wsl2Result = $script:wsl2Result
             
             # Handle the new return format (hashtable with Success, NeedsReboot, Ready properties)
             $wsl2Success = $false
@@ -1608,17 +1767,24 @@ $runSetupButton.Add_Click({
             
             # Install Docker in WSL2 (required for all services)
             Send-Output -Message "[Server $serverNum] Ensuring Docker is installed in WSL2..." -Color "Cyan" -ServerNum $serverNum
-            $dockerInstalled = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password
+            Invoke-WithOutput -ScriptBlock {
+                $script:dockerInstalled = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password
+            } -ServerNum $serverNum
+            $dockerInstalled = $script:dockerInstalled
             
             if (-not $dockerInstalled) {
                 Send-Output -Message "[Server $serverNum] Failed to install Docker in WSL2. Skipping service deployment." -Color "Red" -ServerNum $serverNum
                 Send-Output -Message "[Server $serverNum] This may indicate WSL2 is not fully ready." -Color "Yellow" -ServerNum $serverNum
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker in WSL2 failed" }
             }
+            Send-Output -Message "[Server $serverNum] Docker is ready in WSL2" -Color "Green" -ServerNum $serverNum
             
             # Install Traefik
             Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy in WSL2..." -Color "Cyan" -ServerNum $serverNum
-            $traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+            Invoke-WithOutput -ScriptBlock {
+                $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+            } -ServerNum $serverNum
+            $traefikSuccess = $script:traefikSuccess
             
             if ($traefikSuccess) {
                 Send-Output -Message "[Server $serverNum] Traefik installed successfully in WSL2" -Color "Green" -ServerNum $serverNum
@@ -1631,7 +1797,10 @@ $runSetupButton.Add_Click({
             $serviceSuccess = $false
             switch ($Config.Service) {
                 "Portainer" {
-                    $serviceSuccess = Install-Portainer -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-Portainer -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] Portainer deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
                     }
@@ -1640,7 +1809,10 @@ $runSetupButton.Add_Click({
                     }
                 }
                 "AdGuard" {
-                    $serviceSuccess = Install-AdGuard -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-AdGuard -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] AdGuard deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
                     }
@@ -1649,7 +1821,10 @@ $runSetupButton.Add_Click({
                     }
                 }
                 "N8N" {
-                    $serviceSuccess = Install-N8N -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-N8N -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] n8n deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
                     }
@@ -1658,7 +1833,10 @@ $runSetupButton.Add_Click({
                     }
                 }
                 "Heimdall" {
-                    $serviceSuccess = Install-Heimdall -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-Heimdall -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] Heimdall deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
                     }
@@ -1667,7 +1845,10 @@ $runSetupButton.Add_Click({
                     }
                 }
                 "Crafty" {
-                    $serviceSuccess = Install-Crafty -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    Invoke-WithOutput -ScriptBlock {
+                        $script:serviceSuccess = Install-Crafty -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
+                    } -ServerNum $serverNum
+                    $serviceSuccess = $script:serviceSuccess
                     if ($serviceSuccess) {
                         Send-Output -Message "[Server $serverNum] Crafty deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
                     }
@@ -1698,6 +1879,7 @@ $runSetupButton.Add_Click({
         [void]$powershell.AddArgument($config)
         [void]$powershell.AddArgument($script:outputQueue)
         [void]$powershell.AddArgument("$PSScriptRoot\modules")
+        [void]$powershell.AddArgument($script:terminalMode)  # Pass terminal mode to runspace
         
         $handle = $powershell.BeginInvoke()
         
