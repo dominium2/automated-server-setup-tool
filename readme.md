@@ -31,6 +31,8 @@ This tool eliminates the repetitive and time-consuming process of setting up ser
 - Debian-based Linux distributions (Ubuntu, Debian, Linux Mint, etc.)
 - Windows 11 (with WSL2)
 
+> ⚠️ **Windows VM Limitation**: Windows setup will not work on virtual machines because WSL2 cannot be installed in a VM (it requires nested virtualization which is often unavailable or unsupported). WSL1 is not a viable alternative as it does not support Docker.
+
 ## Prerequisites
 
 - PowerShell 5.1 or later
@@ -139,6 +141,11 @@ Code documentation is available in the `docs/` folder:
 - Verify internet connectivity on target server
 - Check if virtualization is enabled in BIOS
 - Ensure sufficient disk space
+
+**Windows Setup Fails in VM:**
+- WSL2 cannot be installed in a virtual machine as it requires nested virtualization
+- WSL1 does not support Docker, so it cannot be used as an alternative
+- For Windows-based deployments, use a physical machine or a cloud instance with nested virtualization support
 
 **Port Conflicts:**
 - Traefik automatically manages ports, but ensure port 80/443 are available
