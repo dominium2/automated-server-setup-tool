@@ -85,27 +85,31 @@ function Test-SSHConnection {
             Write-LogDebug -Message "Using plink for SSH connection to $IP" -Component "SSH"
             Write-Host "  Using plink for SSH connection..." -ForegroundColor Cyan
             
-            # First, auto-accept the host key by caching it
-            # Use echo y to automatically accept the host key prompt
-            Write-LogDebug -Message "Auto-accepting SSH host key for $IP" -Component "SSH"
-            Write-Host "  Auto-accepting SSH host key..." -ForegroundColor Cyan
+            # Create a temporary answer file to auto-accept host key
+            $tempAnswerFile = [System.IO.Path]::GetTempFileName()
+            Set-Content -Path $tempAnswerFile -Value "y"
             
-            # Run a dummy command to cache the host key (echo y handles the prompt)
-            $null = cmd /c "echo y | plink -pw `"$Password`" $User@$IP exit 2>&1"
-            
-            # Now run the actual connection test with -batch flag (no interactive prompts)
-            $result = & plink -batch -pw $Password $User@$IP "hostname" 2>&1
-            
-            if ($LASTEXITCODE -eq 0 -and $result -and $result -notmatch "FATAL ERROR" -and $result -notmatch "Access denied" -and $result -notmatch "host key") {
-                Write-LogSuccess -Message "SSH connection successful to $IP (hostname: $result)" -Component "SSH"
-                Write-Host "SSH connection successful!" -ForegroundColor Green
-                Write-Host "Connected to: $result" -ForegroundColor Green
-                return $true
+            try {
+                # Use the answer file to auto-accept host key, then connect
+                $result = Get-Content $tempAnswerFile | & plink -pw $Password $User@$IP "hostname" 2>&1
+                
+                if ($LASTEXITCODE -eq 0 -and $result -and $result -notmatch "FATAL ERROR" -and $result -notmatch "Access denied") {
+                    Write-LogSuccess -Message "SSH connection successful to $IP (hostname: $result)" -Component "SSH"
+                    Write-Host "SSH connection successful!" -ForegroundColor Green
+                    Write-Host "Connected to: $result" -ForegroundColor Green
+                    return $true
+                }
+                else {
+                    Write-LogError -Message "SSH connection failed to ${IP}: $result" -Component "SSH"
+                    Write-Host "SSH connection failed: $result" -ForegroundColor Red
+                    return $false
+                }
             }
-            else {
-                Write-LogError -Message "SSH connection failed to ${IP}: $result" -Component "SSH"
-                Write-Host "SSH connection failed: $result" -ForegroundColor Red
-                return $false
+            finally {
+                # Clean up temp file
+                if (Test-Path $tempAnswerFile) {
+                    Remove-Item $tempAnswerFile -Force
+                }
             }
         }
         else {
@@ -479,11 +483,7 @@ function Invoke-RemoteCommand {
                 return $null
             }
             
-            # First ensure host key is cached (auto-accept if needed)
-            $null = cmd /c "echo y | plink -pw `"$Password`" `"$User@$IP`" exit 2>&1"
-            
-            # Now run the actual command with -batch flag (no interactive prompts)
-            $result = & plink -batch -pw $Password "$User@$IP" $Command 2>&1
+            $result = Write-Output y | plink -batch -pw $Password "$User@$IP" $Command 2>&1
             
             if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied|cannot|permission denied") {
                 Write-LogError -Message "SSH command failed on ${IP}: $result" -Component "RemoteCommand"
