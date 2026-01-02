@@ -1576,18 +1576,9 @@ $runSetupButton.Add_Click({
             }
         }
         
-        # Import modules in the runspace
-        # Import logging first as other modules may depend on it
-        Import-Module "$ModulesPath\Logging.psm1" -Force -ErrorAction SilentlyContinue
-        Import-Module "$ModulesPath\RemoteConnection.psm1" -Force
-        Import-Module "$ModulesPath\ServicesDebian\DockerSetupDebian.psm1" -Force
-        Import-Module "$ModulesPath\ServicesDebian\TraefikSetupDebian.psm1" -Force
-        Import-Module "$ModulesPath\ServicesDebian\PortainerSetupDebian.psm1" -Force
-        Import-Module "$ModulesPath\ServicesDebian\AdGuardSetupDebian.psm1" -Force
-        Import-Module "$ModulesPath\ServicesDebian\N8NSetupDebian.psm1" -Force
-        Import-Module "$ModulesPath\ServicesDebian\CraftySetupDebian.psm1" -Force
-        Import-Module "$ModulesPath\ServicesDebian\HeimdallSetupDebian.psm1" -Force
-        Import-Module "$ModulesPath\ServicesWindows\WSL2SetupWindows.psm1" -Force
+        # Import the consolidated RMSetup module in the runspace
+        # This module contains all functionality: Logging, Remote Connection, Health Monitoring, Service Installation, WSL2 Setup
+        Import-Module "$ModulesPath\RMSetup.psm1" -Force
         
         $serverNum = $Config.ServerNumber
         Send-Output -Message "[Server $serverNum] Starting deployment to $($Config.IP)..." -Color "Cyan" -ServerNum $serverNum
