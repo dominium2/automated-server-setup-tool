@@ -1714,10 +1714,11 @@ $runSetupButton.Add_Click({
         elseif ($osType -eq "Windows") {
             Send-Output -Message "[Server $serverNum] Deploying on Windows system..." -Color "Yellow" -ServerNum $serverNum
             
-            # Step 1: Install WSL2 first (with automatic reboot if needed)
-            Send-Output -Message "[Server $serverNum] Step 1: Installing WSL2 (required for containerized services)..." -Color "Cyan" -ServerNum $serverNum
+            # Step 1: Install WSL first (with automatic reboot if needed)
+            # Using WSL1 and Debian for better VM compatibility
+            Send-Output -Message "[Server $serverNum] Step 1: Installing WSL (required for containerized services)..." -Color "Cyan" -ServerNum $serverNum
             Invoke-WithOutput -ScriptBlock {
-                $script:wsl2Result = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -Distribution "Ubuntu" -AutoReboot -WaitForReboot
+                $script:wsl2Result = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -Distribution "Debian" -WSLVersion 1 -AutoReboot -WaitForReboot
             } -ServerNum $serverNum
             $wsl2Result = $script:wsl2Result
             

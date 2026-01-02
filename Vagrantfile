@@ -59,7 +59,7 @@ Vagrant.configure("2") do |config|
       
       server.vm.provider "virtualbox" do |vb|
         vb.name = "HomeLab-Windows#{i}"
-        vb.memory = "2048"
+        vb.memory = "4096"
         vb.cpus = 2
         vb.gui = false
       end

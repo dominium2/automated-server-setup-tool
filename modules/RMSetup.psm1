@@ -724,7 +724,7 @@ function Invoke-WSLCommand {
         [string]$User,
         [string]$Password,
         [string]$Command,
-        [string]$Distribution = "Ubuntu"
+        [string]$Distribution = "Debian"
     )
     
     try {
@@ -750,10 +750,28 @@ function Invoke-WSLCommand {
         $result = Invoke-Command -Session $session -ScriptBlock {
             param($Cmd, $Distro)
             
+            # Helper function to clean WSL output (handles UTF-16LE encoding with null bytes)
+            function Clean-WSLOutput {
+                param($RawOutput)
+                if (-not $RawOutput) { return @() }
+                $cleaned = @()
+                foreach ($line in $RawOutput) {
+                    if ($line) {
+                        # Remove null bytes (UTF-16LE artifact) and trim
+                        $cleanLine = ($line -replace '\x00', '').Trim()
+                        if ($cleanLine -and $cleanLine -match '\S') {
+                            $cleaned += $cleanLine
+                        }
+                    }
+                }
+                return $cleaned
+            }
+            
             # First, check if WSL is installed and functional
             try {
                 $wslCheck = & wsl --status 2>&1
-                if ($LASTEXITCODE -ne 0 -or $wslCheck -match "not installed|is not installed") {
+                $wslCheckClean = (Clean-WSLOutput $wslCheck) -join ' '
+                if ($LASTEXITCODE -ne 0 -or $wslCheckClean -match "not installed|is not installed") {
                     return @{
                         Output = "WSL is not installed or not ready. A system reboot may be required after WSL installation."
                         ExitCode = 1
@@ -769,11 +787,13 @@ function Invoke-WSLCommand {
                 }
             }
             
-            # Check if the distribution exists
-            $distroList = wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
+            # Check if the distribution exists - clean UTF-16 output
+            $distroListRaw = wsl --list --quiet 2>&1
+            $distroList = Clean-WSLOutput $distroListRaw
             
             # Handle case where WSL returns error about not being installed
-            if ($distroList -match "not installed|is not installed") {
+            $distroListStr = $distroList -join ' '
+            if ($distroListStr -match "not installed|is not installed") {
                 return @{
                     Output = "WSL is installed but not fully configured. A system reboot may be required."
                     ExitCode = 1
@@ -781,30 +801,44 @@ function Invoke-WSLCommand {
                 }
             }
             
-            if ($distroList -notmatch $Distro) {
-                # Check for Ubuntu variants if looking for "Ubuntu"
-                $foundDistro = $null
-                if ($Distro -eq "Ubuntu") {
-                    $foundDistro = $distroList | Where-Object { $_ -match "Ubuntu" } | Select-Object -First 1
+            # Check if our distribution exists in the cleaned list
+            $foundDistro = $null
+            foreach ($d in $distroList) {
+                if ($d -eq $Distro -or $d -match "^$Distro$" -or $d -match "^${Distro}\s*\(Default\)") {
+                    $foundDistro = $Distro
+                    break
                 }
-                
-                if (-not $foundDistro) {
-                    $availableDistros = if ($distroList) { $distroList -join ', ' } else { "None installed" }
-                    return @{
-                        Output = "Distribution '$Distro' not found. Available distributions: $availableDistros"
-                        ExitCode = 1
-                        WSLNotReady = $false
-                        DistributionMissing = $true
-                    }
+                # Handle Ubuntu variants
+                if ($Distro -eq "Ubuntu" -and $d -match "Ubuntu") {
+                    $foundDistro = ($d -replace '\s*\(Default\)', '').Trim()
+                    break
                 }
-                
-                # Use the found Ubuntu variant
-                $Distro = $foundDistro
+                # Handle Debian variants
+                if ($Distro -eq "Debian" -and $d -match "Debian") {
+                    $foundDistro = ($d -replace '\s*\(Default\)', '').Trim()
+                    break
+                }
             }
             
+            if (-not $foundDistro) {
+                $availableDistros = if ($distroList.Count -gt 0) { $distroList -join ', ' } else { "None installed" }
+                return @{
+                    Output = "Distribution '$Distro' not found. Available distributions: $availableDistros"
+                    ExitCode = 1
+                    WSLNotReady = $false
+                    DistributionMissing = $true
+                }
+            }
+            
+            # Use the found distribution name
+            $Distro = $foundDistro
+            
             # Check if distribution is running, if not start it
-            $runningDistros = wsl --list --running --quiet 2>&1 | Where-Object { $_ -match '\S' }
-            if ($runningDistros -notmatch $Distro) {
+            $runningDistrosRaw = wsl --list --running --quiet 2>&1
+            $runningDistros = Clean-WSLOutput $runningDistrosRaw
+            $isRunning = $runningDistros | Where-Object { $_ -match $Distro }
+            
+            if (-not $isRunning) {
                 # Start the distribution
                 wsl -d $Distro -u root echo "Starting distribution..." 2>&1 | Out-Null
                 Start-Sleep -Seconds 2
@@ -3542,17 +3576,17 @@ networks:
 function Test-WSLReady {
     <#
     .SYNOPSIS
-        Tests if WSL2 is ready and fully functional on a remote Windows system.
+        Tests if WSL is ready and fully functional on a remote Windows system.
     
     .DESCRIPTION
-        Checks if WSL2 features are enabled, kernel is installed, and a distribution is available.
-        Returns a detailed status object.
+        Checks if WSL features are enabled, kernel is installed, and a distribution is available.
+        Works with both WSL1 and WSL2. Returns a detailed status object.
     #>
     param (
         [string]$IP,
         [string]$User,
         [string]$Password,
-        [string]$Distribution = "Ubuntu"
+        [string]$Distribution = "Debian"
     )
     
     try {
@@ -3640,9 +3674,30 @@ function Test-WSLReady {
                 
                 # Check if distribution is installed
                 if ($result.WSLKernelInstalled) {
-                    $distroList = & wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
+                    $distroListRaw = & wsl --list --quiet 2>&1
+                    # WSL outputs UTF-16LE with null bytes - clean them up
+                    $distroList = ($distroListRaw | ForEach-Object { 
+                        if ($_) { ($_ -replace '\x00', '').Trim() }
+                    }) | Where-Object { $_ -match '\S' }
                     
-                    if ($distroList -match $Distro -or ($Distro -eq "Ubuntu" -and $distroList -match "Ubuntu")) {
+                    # Check for distribution match
+                    $distroFound = $false
+                    foreach ($distro in $distroList) {
+                        if ($distro -match $Distro -or $distro -eq $Distro) {
+                            $distroFound = $true
+                            break
+                        }
+                        if ($Distro -eq "Ubuntu" -and $distro -match "Ubuntu") {
+                            $distroFound = $true
+                            break
+                        }
+                        if ($Distro -eq "Debian" -and $distro -match "Debian") {
+                            $distroFound = $true
+                            break
+                        }
+                    }
+                    
+                    if ($distroFound) {
                         $result.DistributionInstalled = $true
                         
                         # Test if distribution is actually usable
@@ -3661,7 +3716,7 @@ function Test-WSLReady {
             
             # Build status message
             if ($result.NeedsReboot) {
-                $result.Message = "System reboot required to complete WSL2 installation"
+                $result.Message = "System reboot required to complete WSL installation"
             }
             elseif (-not $result.WSLFeatureEnabled) {
                 $result.Message = "WSL feature is not enabled"
@@ -3670,7 +3725,7 @@ function Test-WSLReady {
                 $result.Message = "Virtual Machine Platform feature is not enabled"
             }
             elseif (-not $result.WSLKernelInstalled) {
-                $result.Message = "WSL2 kernel is not installed"
+                $result.Message = "WSL kernel/component is not installed"
             }
             elseif (-not $result.DistributionInstalled) {
                 $result.Message = "Linux distribution '$Distro' is not installed"
@@ -3679,7 +3734,7 @@ function Test-WSLReady {
                 $result.Message = "Linux distribution '$Distro' is installed but not ready"
             }
             else {
-                $result.Message = "WSL2 is fully ready with $Distro distribution"
+                $result.Message = "WSL is fully ready with $Distro distribution"
             }
             
             return $result
@@ -3711,19 +3766,33 @@ function Test-WSLReady {
 }
 
 function Install-WSL2 {
+    <#
+    .SYNOPSIS
+        Installs WSL (Windows Subsystem for Linux) on a remote Windows system.
+    
+    .DESCRIPTION
+        Installs WSL using a reliable MSI-based approach that works in VM environments.
+        Defaults to WSL1 which doesn't require nested virtualization and Debian which is lightweight.
+        
+    .PARAMETER WSLVersion
+        WSL version to use: 1 or 2. Default is 1 (works in VMs without nested virtualization).
+        WSL2 requires nested virtualization support which may not work in all VM environments.
+    #>
     param (
         [string]$IP,
         [string]$User,
         [string]$Password,
-        [string]$Distribution = "Ubuntu",
+        [string]$Distribution = "Debian",
+        [ValidateSet(1, 2)]
+        [int]$WSLVersion = 1,
         [switch]$AutoReboot,
         [switch]$WaitForReboot
     )
 
     try {
-        Write-Host "Starting WSL2 installation on $IP..." -ForegroundColor Cyan
+        Write-Host "Starting WSL installation on $IP (WSL$WSLVersion with $Distribution)..." -ForegroundColor Cyan
 
-        # First, check current WSL2 status
+        # First, check current WSL status
         Write-Host "  Checking current WSL2 status..." -ForegroundColor Cyan
         $wslStatus = Test-WSLReady -IP $IP -User $User -Password $Password -Distribution $Distribution
         
@@ -3784,18 +3853,34 @@ function Install-WSL2 {
 
         # Execute installation on remote system
         $installResult = Invoke-Command -Session $session -ScriptBlock {
-            param($DistroName)
+            param($DistroName, $TargetWSLVersion)
             
             $VerbosePreference = 'Continue'
             $installSuccess = $true
             
             try {
-                # Check if WSL is already installed
+                # Check if WSL is already installed and functional
                 Write-Host "  Checking current WSL status..." -ForegroundColor Cyan
-                $wslStatus = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
+                
+                # Test if wsl command works
+                $wslWorking = $false
+                try {
+                    $wslStatusOutput = & wsl --status 2>&1
+                    if ($LASTEXITCODE -eq 0 -and $wslStatusOutput -notmatch "not installed|is not installed") {
+                        $wslWorking = $true
+                        Write-Host "  WSL is already functional" -ForegroundColor Green
+                    }
+                }
+                catch {
+                    # WSL not working yet
+                }
+                
+                # Check Windows features
+                $wslFeature = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
+                $vmPlatform = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
                 
                 # Install WSL feature if not enabled
-                if ($wslStatus.State -ne "Enabled") {
+                if ($wslFeature.State -ne "Enabled") {
                     Write-Host "  Installing WSL feature..." -ForegroundColor Yellow
                     try {
                         Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart -ErrorAction Stop | Out-Null
@@ -3831,19 +3916,6 @@ function Install-WSL2 {
                     Write-Host "  Virtual Machine Platform is already enabled" -ForegroundColor Green
                 }
 
-                # Check if reboot is required
-                $rebootRequired = $false
-                if ($wslStatus.State -ne "Enabled" -or $vmPlatformStatus.State -ne "Enabled") {
-                    $rebootRequired = $true
-                }
-                
-                # Check for pending reboot in registry BEFORE attempting kernel install
-                $rebootPending = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
-                $rebootReq = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-                if ($rebootPending -or $rebootReq) {
-                    $rebootRequired = $true
-                }
-                
                 # Test if WSL is actually functional (not just "enabled" in features)
                 Write-Host "  Testing WSL functionality..." -ForegroundColor Cyan
                 $wslFunctional = $false
@@ -3854,76 +3926,73 @@ function Install-WSL2 {
                         Write-Host "  WSL is functional" -ForegroundColor Green
                     }
                     else {
-                        Write-Host "  WSL is not yet functional - reboot required" -ForegroundColor Yellow
-                        $rebootRequired = $true
+                        Write-Host "  WSL is not yet functional - will attempt to install WSL component" -ForegroundColor Yellow
                     }
                 }
                 catch {
-                    Write-Host "  WSL test failed - reboot likely required" -ForegroundColor Yellow
-                    $rebootRequired = $true
-                }
-                
-                # If reboot is required, stop here and return
-                if ($rebootRequired -and -not $wslFunctional) {
-                    Write-Host "  System reboot is required before WSL2 can be fully configured" -ForegroundColor Yellow
-                    return @{
-                        Success = $true
-                        NeedsReboot = $true
-                        Ready = $false
-                        Message = "WSL2 features enabled. System reboot required before continuing."
-                    }
+                    Write-Host "  WSL test failed - will attempt to install WSL component" -ForegroundColor Yellow
                 }
 
-                # Update WSL using the modern method (wsl --update)
-                Write-Host "  Updating WSL to latest version..." -ForegroundColor Cyan
-                try {
-                    $wslUpdateOutput = & wsl --update 2>&1
-                    $wslUpdateExitCode = $LASTEXITCODE
+                # Install WSL via MSI if not working (more reliable in VM environments)
+                if (-not $wslWorking) {
+                    Write-Host "  Installing WSL via MSI package (reliable method for VMs)..." -ForegroundColor Cyan
                     
-                    if ($wslUpdateExitCode -eq 0) {
-                        Write-Host "  WSL updated successfully" -ForegroundColor Green
-                    }
-                    else {
-                        Write-Host "  WSL update output: $wslUpdateOutput" -ForegroundColor Yellow
-                        # Try the --web-download flag for environments without Microsoft Store
-                        Write-Host "  Trying alternative update method..." -ForegroundColor Cyan
-                        $wslUpdateOutput2 = & wsl --update --web-download 2>&1
-                        if ($LASTEXITCODE -eq 0) {
-                            Write-Host "  WSL updated successfully via web download" -ForegroundColor Green
+                    $wslMsiUrl = "https://github.com/microsoft/WSL/releases/download/2.3.26/wsl.2.3.26.0.x64.msi"
+                    $wslMsiPath = "C:\wsl_install.msi"
+                    
+                    try {
+                        # Download WSL MSI
+                        Write-Host "  Downloading WSL MSI from GitHub..." -ForegroundColor Cyan
+                        [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+                        Invoke-WebRequest -Uri $wslMsiUrl -OutFile $wslMsiPath -UseBasicParsing -ErrorAction Stop
+                        
+                        if (Test-Path $wslMsiPath) {
+                            Write-Host "  Installing WSL MSI..." -ForegroundColor Cyan
+                            $msiResult = Start-Process msiexec.exe -ArgumentList '/i', $wslMsiPath, '/quiet', '/norestart' -Wait -PassThru
+                            
+                            if ($msiResult.ExitCode -eq 0 -or $msiResult.ExitCode -eq 3010) {
+                                Write-Host "  WSL MSI installed successfully" -ForegroundColor Green
+                            }
+                            else {
+                                Write-Host "  WSL MSI installation returned exit code: $($msiResult.ExitCode)" -ForegroundColor Yellow
+                            }
+                            
+                            # Cleanup
+                            Remove-Item $wslMsiPath -Force -ErrorAction SilentlyContinue
                         }
-                        else {
-                            Write-Host "  WSL update returned: $wslUpdateOutput2" -ForegroundColor Yellow
+                    }
+                    catch {
+                        Write-Host "  Warning: MSI installation failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                        Write-Host "  Falling back to wsl --install method..." -ForegroundColor Cyan
+                        
+                        # Fallback to wsl --install
+                        try {
+                            $wslInstallOutput = & wsl --install --no-launch 2>&1
+                            Write-Host "  wsl --install output: $wslInstallOutput" -ForegroundColor Cyan
+                        }
+                        catch {
+                            Write-Host "  wsl --install also failed: $($_.Exception.Message)" -ForegroundColor Yellow
                         }
                     }
-                }
-                catch {
-                    Write-Host "  Warning: WSL update command failed: $($_.Exception.Message)" -ForegroundColor Yellow
-                }
-                
-                # Install WSL if not yet installed (uses wsl --install which handles everything)
-                Write-Host "  Ensuring WSL is fully installed..." -ForegroundColor Cyan
-                try {
-                    $wslInstallOutput = & wsl --install --no-launch 2>&1
-                    if ($LASTEXITCODE -eq 0 -or $wslInstallOutput -match "already installed") {
-                        Write-Host "  WSL installation verified" -ForegroundColor Green
-                    }
-                    else {
-                        Write-Host "  WSL install output: $wslInstallOutput" -ForegroundColor Yellow
-                    }
-                }
-                catch {
-                    Write-Host "  Warning: wsl --install failed: $($_.Exception.Message)" -ForegroundColor Yellow
                 }
 
-                # Set WSL2 as default version
-                Write-Host "  Setting WSL2 as default version..." -ForegroundColor Cyan
+                # Set WSL version (WSL1 is more reliable in VM environments)
+                Write-Host "  Setting WSL$TargetWSLVersion as default version..." -ForegroundColor Cyan
                 try {
-                    $setVersionOutput = & wsl --set-default-version 2 2>&1
+                    $setVersionOutput = & wsl --set-default-version $TargetWSLVersion 2>&1
                     if ($LASTEXITCODE -eq 0) {
-                        Write-Host "  WSL2 set as default version" -ForegroundColor Green
+                        Write-Host "  WSL$TargetWSLVersion set as default version" -ForegroundColor Green
                     }
                     else {
                         Write-Host "  Set default version output: $setVersionOutput" -ForegroundColor Yellow
+                        # If WSL2 fails (common in VMs), try WSL1
+                        if ($TargetWSLVersion -eq 2) {
+                            Write-Host "  WSL2 may not work in this VM environment. Trying WSL1..." -ForegroundColor Yellow
+                            $setVersionOutput = & wsl --set-default-version 1 2>&1
+                            if ($LASTEXITCODE -eq 0) {
+                                Write-Host "  WSL1 set as default version (WSL2 not available)" -ForegroundColor Green
+                            }
+                        }
                     }
                 }
                 catch {
@@ -3948,40 +4017,58 @@ function Install-WSL2 {
                 if ($DistroName -and $DistroName -ne "") {
                     Write-Host "  Checking for Linux distribution: $DistroName..." -ForegroundColor Cyan
                     
+                    # Helper function to clean WSL output (handles UTF-16LE encoding with null bytes)
+                    function Get-CleanWSLDistroList {
+                        $rawList = & wsl --list --quiet 2>&1
+                        $cleanList = ($rawList | ForEach-Object { 
+                            if ($_) { ($_ -replace '\x00', '').Trim() }
+                        }) | Where-Object { $_ -match '\S' -and $_ -notmatch 'not installed|is not installed' }
+                        return $cleanList
+                    }
+                    
                     # Check if distribution is already installed
-                    $installedDistros = & wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
+                    $installedDistros = Get-CleanWSLDistroList
                     
                     # Check if WSL returned an error indicating it's not ready
-                    $distroListStr = $installedDistros -join ' '
+                    $rawOutput = & wsl --list --quiet 2>&1
+                    $distroListStr = ($rawOutput -join ' ') -replace '\x00', ''
                     if ($distroListStr -match "not installed|is not installed") {
                         Write-Host "  WSL is not fully installed yet - reboot required" -ForegroundColor Yellow
                         return @{
                             Success = $true
                             NeedsReboot = $true
                             Ready = $false
-                            Message = "WSL2 features enabled but not active. System reboot required."
+                            Message = "WSL features enabled but not active. System reboot required."
                         }
                     }
                     
                     Write-Host "  Currently installed distributions: $($installedDistros -join ', ')" -ForegroundColor Cyan
                     
-                    # Check for exact match or Ubuntu variants
+                    # Check for exact match or variants
                     $foundDistro = $null
-                    if ($installedDistros -match "^$DistroName$") {
-                        $foundDistro = $DistroName
-                    }
-                    elseif ($DistroName -eq "Ubuntu" -and $installedDistros -match "Ubuntu") {
-                        # Find any Ubuntu variant
-                        $foundDistro = $installedDistros | Where-Object { $_ -match "Ubuntu" } | Select-Object -First 1
-                        Write-Host "  Found Ubuntu variant: $foundDistro" -ForegroundColor Cyan
+                    foreach ($distro in $installedDistros) {
+                        if ($distro -eq $DistroName -or $distro -match "^$DistroName$") {
+                            $foundDistro = $distro
+                            break
+                        }
+                        if ($DistroName -eq "Ubuntu" -and $distro -match "Ubuntu") {
+                            $foundDistro = $distro
+                            Write-Host "  Found Ubuntu variant: $foundDistro" -ForegroundColor Cyan
+                            break
+                        }
+                        if ($DistroName -eq "Debian" -and $distro -match "Debian") {
+                            $foundDistro = $distro
+                            Write-Host "  Found Debian: $foundDistro" -ForegroundColor Cyan
+                            break
+                        }
                     }
                     
                     if ($foundDistro) {
                         Write-Host "  $foundDistro is already installed" -ForegroundColor Green
                         
-                        # Ensure it's running WSL2
-                        Write-Host "  Ensuring $foundDistro is using WSL2..." -ForegroundColor Cyan
-                        & wsl --set-version $foundDistro 2 2>&1 | Out-Null
+                        # Ensure it's running correct WSL version
+                        Write-Host "  Ensuring $foundDistro is using WSL$TargetWSLVersion..." -ForegroundColor Cyan
+                        & wsl --set-version $foundDistro $TargetWSLVersion 2>&1 | Out-Null
                         
                         # Verify the distribution is accessible
                         $testResult = & wsl -d $foundDistro -u root echo "WSL_TEST_SUCCESS" 2>&1
@@ -3997,78 +4084,176 @@ function Install-WSL2 {
                         Write-Host "  Installing $DistroName distribution..." -ForegroundColor Yellow
                         Write-Host "  Note: This requires internet connectivity and may take several minutes..." -ForegroundColor Cyan
                         
-                        # Use wsl --install to install the distribution
+                        # Map distribution name to launcher executable
+                        $launcherMap = @{
+                            'Debian' = 'debian.exe'
+                            'Ubuntu' = 'ubuntu.exe'
+                            'Ubuntu-20.04' = 'ubuntu2004.exe'
+                            'Ubuntu-22.04' = 'ubuntu2204.exe'
+                            'Ubuntu-24.04' = 'ubuntu2404.exe'
+                        }
+                        
+                        # Try wsl --install first to download the distribution
+                        Write-Host "  Downloading $DistroName via wsl --install..." -ForegroundColor Cyan
                         $installOutput = & wsl --install -d $DistroName --no-launch 2>&1
+                        $installExitCode = $LASTEXITCODE
+                        $installOutputStr = $installOutput -join ' '
                         
-                        # Wait longer for installation to complete
-                        Write-Host "  Waiting for $DistroName installation to complete..." -ForegroundColor Cyan
-                        Start-Sleep -Seconds 30
+                        Write-Host "  wsl --install output: $installOutputStr" -ForegroundColor Cyan
                         
-                        # Check if installation succeeded
+                        # Wait for download/installation to complete
+                        Write-Host "  Waiting for $DistroName package installation..." -ForegroundColor Cyan
+                        Start-Sleep -Seconds 10
+                        
+                        # Check if distribution is now in the list
                         $installedDistros = & wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
+                        $distroInList = $installedDistros -match $DistroName
                         
-                        if ($installedDistros -match $DistroName) {
-                            Write-Host "  $DistroName installed successfully" -ForegroundColor Green
+                        # If not in list but install said successful, try launcher to register it
+                        if (-not $distroInList -and ($installOutputStr -match "installed|successful" -or $installExitCode -eq 0)) {
+                            Write-Host "  Distribution downloaded but not registered. Using launcher to initialize..." -ForegroundColor Yellow
                             
-                            # Initialize the distribution by running commands as root
-                            Write-Host "  Initializing $DistroName..." -ForegroundColor Cyan
-                            
-                            try {
-                                # Run a simple command to trigger initialization and test
-                                $initTest = & wsl -d $DistroName -u root bash -c "echo 'Initialized' && apt-get update -qq" 2>&1
-                                Start-Sleep -Seconds 5
-                                
-                                # Verify it's working
-                                $verifyTest = & wsl -d $DistroName -u root echo "SUCCESS" 2>&1
-                                if ($verifyTest -match "SUCCESS") {
-                                    Write-Host "  $DistroName initialized and ready for use" -ForegroundColor Green
+                            $launcher = $launcherMap[$DistroName]
+                            if ($launcher) {
+                                Write-Host "  Running: $launcher install --root" -ForegroundColor Cyan
+                                try {
+                                    $launcherOutput = & $launcher install --root 2>&1
+                                    $launcherExitCode = $LASTEXITCODE
+                                    $launcherOutputStr = $launcherOutput -join ' '
+                                    
+                                    if ($launcherExitCode -eq 0 -or $launcherOutputStr -match "successful") {
+                                        Write-Host "  $DistroName registered successfully via launcher" -ForegroundColor Green
+                                    }
+                                    else {
+                                        Write-Host "  Launcher output: $launcherOutputStr" -ForegroundColor Yellow
+                                        
+                                        # Check for VM/virtualization errors and suggest WSL1
+                                        if ($launcherOutputStr -match "0x80370102|Virtual Machine Platform|virtualization") {
+                                            Write-Host "  Virtualization error detected. Ensuring WSL1 is set..." -ForegroundColor Yellow
+                                            & wsl --set-default-version 1 2>&1 | Out-Null
+                                            
+                                            # Try launcher again with WSL1
+                                            $launcherOutput2 = & $launcher install --root 2>&1
+                                            if ($LASTEXITCODE -eq 0 -or ($launcherOutput2 -join ' ') -match "successful") {
+                                                Write-Host "  $DistroName registered successfully with WSL1" -ForegroundColor Green
+                                            }
+                                        }
+                                    }
                                 }
-                                else {
-                                    Write-Host "  Warning: $DistroName initialization may have issues: $verifyTest" -ForegroundColor Yellow
+                                catch {
+                                    Write-Host "  Launcher error: $($_.Exception.Message)" -ForegroundColor Yellow
                                 }
                             }
-                            catch {
-                                Write-Host "  Warning: Could not initialize $DistroName`: $($_.Exception.Message)" -ForegroundColor Yellow
+                            else {
+                                Write-Host "  No launcher mapping found for $DistroName" -ForegroundColor Yellow
+                            }
+                        }
+                        # If install failed with memory/virtualization error, try launcher directly
+                        elseif ($installOutputStr -match "memory|0x8007000e|0x80370102|Virtual Machine Platform") {
+                            Write-Host "  Standard installation failed (VM environment detected)" -ForegroundColor Yellow
+                            
+                            $launcher = $launcherMap[$DistroName]
+                            if ($launcher) {
+                                Write-Host "  Trying launcher-based installation: $launcher install --root" -ForegroundColor Cyan
+                                try {
+                                    # Ensure WSL1 for VM compatibility
+                                    & wsl --set-default-version 1 2>&1 | Out-Null
+                                    
+                                    $launcherOutput = & $launcher install --root 2>&1
+                                    if ($LASTEXITCODE -eq 0 -or ($launcherOutput -join ' ') -match "successful") {
+                                        Write-Host "  $DistroName installed successfully via launcher" -ForegroundColor Green
+                                    }
+                                    else {
+                                        Write-Host "  Launcher output: $($launcherOutput -join ' ')" -ForegroundColor Yellow
+                                    }
+                                }
+                                catch {
+                                    Write-Host "  Launcher installation failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                                }
+                            }
+                        }
+                        
+                        # Final verification - check if distribution is now available
+                        Start-Sleep -Seconds 5
+                        $installedDistros = Get-CleanWSLDistroList
+                        
+                        # Check if our distribution is in the list
+                        $distroInstalled = $false
+                        foreach ($distro in $installedDistros) {
+                            if ($distro -eq $DistroName -or $distro -match $DistroName) {
+                                $distroInstalled = $true
+                                break
+                            }
+                        }
+                        
+                        if ($distroInstalled) {
+                            Write-Host "  $DistroName installed successfully" -ForegroundColor Green
+                            
+                            # Set correct WSL version
+                            & wsl --set-version $DistroName $TargetWSLVersion 2>&1 | Out-Null
+                            
+                            # Verify it's working
+                            $verifyTest = & wsl -d $DistroName -u root echo "SUCCESS" 2>&1
+                            if ($verifyTest -match "SUCCESS") {
+                                Write-Host "  $DistroName initialized and ready for use" -ForegroundColor Green
+                            }
+                            else {
+                                Write-Host "  Warning: $DistroName initialization may have issues: $verifyTest" -ForegroundColor Yellow
                             }
                         }
                         else {
-                            Write-Host "  Error: $DistroName installation failed" -ForegroundColor Red
-                            Write-Host "  Installation output: $installOutput" -ForegroundColor Yellow
-                            Write-Host "  Please install manually: wsl --install -d $DistroName" -ForegroundColor Yellow
-                            Write-Host "  Or install from Microsoft Store" -ForegroundColor Yellow
+                            Write-Host "  Error: $DistroName installation could not be verified" -ForegroundColor Red
+                            Write-Host "  Installed distributions: $($installedDistros -join ', ')" -ForegroundColor Yellow
+                            Write-Host "  Try manually: wsl --install -d $DistroName" -ForegroundColor Yellow
                         }
                     }
                 }
 
-                # Return installation result
-                # Check again for reboot requirement after installation
+                # Final verification - test if WSL is actually working
+                Write-Host "  Performing final WSL verification..." -ForegroundColor Cyan
+                $wslActuallyWorks = $false
+                try {
+                    $finalTest = & wsl -d $DistroName -u root echo "FINAL_WSL_TEST" 2>&1
+                    if ($finalTest -match "FINAL_WSL_TEST") {
+                        $wslActuallyWorks = $true
+                        Write-Host "  WSL is fully functional!" -ForegroundColor Green
+                    }
+                }
+                catch {
+                    Write-Host "  WSL test failed: $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+                
+                # If WSL actually works, we don't need a reboot regardless of registry flags
+                if ($wslActuallyWorks) {
+                    return @{
+                        Success = $true
+                        NeedsReboot = $false
+                        Ready = $true
+                        Message = "WSL installation completed successfully. $DistroName is ready."
+                    }
+                }
+                
+                # Only check for reboot if WSL is not working
                 $wslStatusAfter = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
                 $vmStatusAfter = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
                 
-                $rebootRequired = ($wslStatusAfter.RestartNeeded -eq $true) -or ($vmStatusAfter.RestartNeeded -eq $true) -or $rebootRequired
-                
-                # Also check registry for pending reboot
-                $rebootPending = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
-                $rebootReq = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-                if ($rebootPending -or $rebootReq) {
-                    $rebootRequired = $true
-                }
+                $rebootRequired = ($wslStatusAfter.RestartNeeded -eq $true) -or ($vmStatusAfter.RestartNeeded -eq $true)
                 
                 $message = if ($rebootRequired) {
-                    "WSL2 components installed successfully. System reboot is required to complete installation."
+                    "WSL components installed but system reboot is required to activate."
                 } else {
-                    "WSL2 installation completed successfully."
+                    "WSL installation completed but distribution may need manual setup."
                 }
 
                 return @{
                     Success = $installSuccess
                     NeedsReboot = $rebootRequired
-                    Ready = (-not $rebootRequired)
+                    Ready = $false
                     Message = $message
                 }
             }
             catch {
-                Write-Host "  Error during WSL2 installation: $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "  Error during WSL installation: $($_.Exception.Message)" -ForegroundColor Red
                 return @{
                     Success = $false
                     NeedsReboot = $false
@@ -4076,7 +4261,7 @@ function Install-WSL2 {
                     Message = "Installation failed: $($_.Exception.Message)"
                 }
             }
-        } -ArgumentList $Distribution
+        } -ArgumentList $Distribution, $WSLVersion
 
         # Close the session
         Remove-PSSession -Session $session
@@ -4151,13 +4336,15 @@ function Invoke-WSL2Reboot {
     
     .DESCRIPTION
         Initiates a reboot on the remote system and can wait for the system to come back online
-        before checking WSL2 status again. Includes protection against infinite reboot loops.
+        before checking WSL status again. Includes protection against infinite reboot loops.
     #>
     param (
         [string]$IP,
         [string]$User,
         [string]$Password,
-        [string]$Distribution = "Ubuntu",
+        [string]$Distribution = "Debian",
+        [ValidateSet(1, 2)]
+        [int]$WSLVersion = 1,
         [switch]$WaitForReboot,
         [int]$TimeoutMinutes = 10,
         [int]$MaxReboots = 2
@@ -4173,8 +4360,8 @@ function Invoke-WSL2Reboot {
         
         if ($script:WSL2RebootCount[$IP] -gt $MaxReboots) {
             Write-Host "Maximum reboot attempts ($MaxReboots) reached for $IP" -ForegroundColor Red
-            Write-Host "WSL2 installation may require manual intervention." -ForegroundColor Yellow
-            Write-Host "Please connect to the VM and run: wsl --update" -ForegroundColor Cyan
+            Write-Host "WSL installation may require manual intervention." -ForegroundColor Yellow
+            Write-Host "Please connect to the VM and run: wsl --status" -ForegroundColor Cyan
             return @{
                 Success = $false
                 NeedsReboot = $false
@@ -4297,7 +4484,7 @@ function Invoke-WSL2Reboot {
         elseif ($wslStatus.NeedsDistribution -or (-not $wslStatus.NeedsReboot)) {
             Write-Host "WSL2 features are ready, continuing with setup..." -ForegroundColor Yellow
             # Continue with distribution installation (pass AutoReboot in case another reboot is somehow needed)
-            return Install-WSL2 -IP $IP -User $User -Password $Password -Distribution $Distribution -AutoReboot -WaitForReboot
+            return Install-WSL2 -IP $IP -User $User -Password $Password -Distribution $Distribution -WSLVersion $WSLVersion -AutoReboot -WaitForReboot
         }
         else {
             Write-Host "WSL2 status after reboot: $($wslStatus.Message)" -ForegroundColor Yellow
