@@ -25,3 +25,75 @@
 
 [2026-01-01 17:54:46.725] [Info] [GUI] Application started
 [2026-01-01 17:54:46.737] [Info] [GUI] Log file: C:\Users\dania\OneDrive - Erasmushogeschool Brussel\Documents\Codes\Powershell\automated-server-setup-tool\modules\..\logs\automated-setup_2026-01-01.log
+[2026-01-01 19:23:17.320] [Info] [Logging] Logging initialized
+
+================================================================================
+=== Automated Server Setup Tool - 2026-01-01 19:23:17
+================================================================================
+
+[2026-01-01 19:23:17.335] [Info] [GUI] Application started
+[2026-01-01 19:23:27.225] [Info] [GUI] Health Monitor button clicked
+[2026-01-01 19:23:59.679] [Info] [GUI] Health Monitor button clicked
+[2026-01-01 19:23:59.699] [Info] [HealthMonitor] Opening Health Monitor window
+[2026-01-01 19:23:59.729] [Info] [HealthMonitoring] Getting server health for 192.168.56.11
+[2026-01-01 19:24:22.877] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:24:44.818] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:24:45.430] [Error] [HealthMonitoring] Error getting Linux server health for 192.168.56.11
+  Exception: Cannot convert value "bash:" to type "System.Double". Error: "The input string 'bash:' was not in a correct format."
+  Inner Exception: Cannot convert value "bash:" to type "System.Double". Error: "The input string 'bash:' was not in a correct format."
+[2026-01-01 19:24:45.469] [Info] [HealthMonitoring] Getting container health for 192.168.56.11
+[2026-01-01 19:25:07.398] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:25:30.579] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:25:54.647] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:26:19.176] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:26:42.451] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:27:07.687] [Info] [Logging] Logging initialized
+
+================================================================================
+=== Automated Server Setup Tool - 2026-01-01 19:27:07
+================================================================================
+
+[2026-01-01 19:27:07.710] [Info] [GUI] Application started
+[2026-01-01 19:27:24.009] [Info] [GUI] Health Monitor button clicked
+[2026-01-01 19:27:52.187] [Info] [GUI] Health Monitor button clicked
+[2026-01-01 19:27:52.200] [Info] [HealthMonitor] Opening Health Monitor window
+[2026-01-01 19:27:52.217] [Info] [HealthMonitoring] Getting server health for 192.168.56.11
+[2026-01-01 19:28:15.387] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:28:37.331] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:28:38.331] [Error] [HealthMonitoring] Error getting Linux server health for 192.168.56.11
+  Exception: Cannot convert value "bash:" to type "System.Double". Error: "The input string 'bash:' was not in a correct format."
+  Inner Exception: Cannot convert value "bash:" to type "System.Double". Error: "The input string 'bash:' was not in a correct format."
+[2026-01-01 19:28:38.346] [Info] [HealthMonitoring] Getting container health for 192.168.56.11
+[2026-01-01 19:29:00.288] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:29:23.337] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:29:46.621] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:30:11.033] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:30:34.104] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:30:57.393] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:31:21.497] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:31:44.711] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:32:08.194] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:32:33.100] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:32:56.041] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:33:19.079] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:33:43.726] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:34:07.353] [Info] [RemoteConnection] Detected Linux OS on 192.168.56.11 (SSH port 22 open)
+[2026-01-01 19:36:23.943] [Info] [Logging] Logging initialized
+
+================================================================================
+=== Automated Server Setup Tool - 2026-01-01 19:36:23
+================================================================================
+
+[2026-01-01 19:36:23.963] [Info] [GUI] Application started
+[2026-01-01 19:36:31.385] [Info] [Logging] Logging initialized
+
+================================================================================
+=== Automated Server Setup Tool - 2026-01-01 19:36:31
+================================================================================
+
+[2026-01-01 19:36:31.405] [Info] [GUI] Application started
+[2026-01-01 19:36:55.773] [Info] [GUI] Health Monitor button clicked
+[2026-01-01 19:36:55.790] [Info] [HealthMonitor] Opening Health Monitor window
+[2026-01-01 19:38:05.118] [Info] [GUI] Health Monitor button clicked
+[2026-01-01 19:38:05.132] [Info] [HealthMonitor] Opening Health Monitor window
+[2026-01-01 19:46:42.631] [Info] [HealthMonitor] Health data refreshed for 1 server(s)
