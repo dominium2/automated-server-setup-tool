@@ -53,11 +53,15 @@ function Install-Heimdall {
             return $false
         }
         
+        # Auto-accept SSH host key by caching it first
+        Write-Host "  Auto-accepting SSH host key..." -ForegroundColor Cyan
+        $null = cmd /c "echo y | plink -pw `"$Password`" $User@$IP exit 2>&1"
+        
         # Function to execute remote command via SSH
         function Invoke-SSHCommand {
             param([string]$Command)
             
-            $result = Write-Output y | plink -batch -pw $Password $User@$IP $Command 2>&1
+            $result = & plink -batch -pw $Password $User@$IP $Command 2>&1
             
             if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied") {
                 Write-Host "Command failed: $Command" -ForegroundColor Red
