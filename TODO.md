@@ -19,4 +19,4 @@
 17. ## Fix the testing
 18. ## Document code thurougly
 19. ## Fix WSL2 install
-20. ## change code structure (code is all over the place)
+20. ## change/overhall code structure (code is all over the place)
