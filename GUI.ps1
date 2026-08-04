@@ -395,7 +395,7 @@ function Show-HealthMonitorWindow {
         
         <!-- Control Bar -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button Name="RefreshButton" Content="🔄 Refresh All" Width="120" Height="30" Margin="0,0,10,0" FontSize="12"/>
+            <Button Name="RefreshButton" Content="  Refresh All" Width="120" Height="30" Margin="0,0,10,0" FontSize="12"/>
             <Button Name="AutoRefreshButton" Content="Auto-Refresh: OFF" Width="140" Height="30" Margin="0,0,10,0" FontSize="12"/>
             <Label Content="Interval:" VerticalAlignment="Center" Margin="10,0,5,0"/>
             <ComboBox Name="RefreshIntervalCombo" Width="80" Height="30" VerticalAlignment="Center">
@@ -436,11 +436,11 @@ function Show-HealthMonitorWindow {
                         <Button Name="ExportReportButton" Content="Export Report" Width="120" Height="30" Margin="10,0,0,0"/>
                     </StackPanel>
                     <RichTextBox Name="ReportOutput" Grid.Row="1" 
-                        IsReadOnly="True" 
-                        Background="#1E1E1E" 
-                        Foreground="White" 
-                        FontFamily="Consolas" 
-                        FontSize="11"
+                         IsReadOnly="True" 
+                         Background="#1E1E1E" 
+                         Foreground="White" 
+                         FontFamily="Consolas" 
+                         FontSize="11"
                         Padding="10"
                         Margin="10"
                         VerticalScrollBarVisibility="Auto"
@@ -456,7 +456,6 @@ function Show-HealthMonitorWindow {
     </Grid>
 </Window>
 "@
-
     $healthReader = New-Object System.Xml.XmlNodeReader $healthXaml
     $healthWindow = [Windows.Markup.XamlReader]::Load($healthReader)
     
@@ -678,11 +677,11 @@ function Show-HealthMonitorWindow {
                 
                 $stateIcon = New-Object System.Windows.Controls.TextBlock
                 if ($container.State -eq "running") {
-                    $stateIcon.Text = "● "
+                    $stateIcon.Text = "🟢 "
                     $stateIcon.Foreground = [System.Windows.Media.Brushes]::Green
                 }
                 else {
-                    $stateIcon.Text = "○ "
+                    $stateIcon.Text = "🔴 "
                     $stateIcon.Foreground = [System.Windows.Media.Brushes]::Red
                 }
                 [void]$namePanel.Children.Add($stateIcon)
@@ -752,7 +751,7 @@ function Show-HealthMonitorWindow {
         
         $script:healthRefreshInProgress = $true
         $refreshButton.IsEnabled = $false
-        $refreshButton.Content = "⏳ Refreshing..."
+        $refreshButton.Content = "  Refreshing..."
         $statusBarText.Text = "Refreshing health data in background..."
         
         # Show loading indicators
@@ -787,10 +786,8 @@ function Show-HealthMonitorWindow {
         $healthCheckScript = {
             param($Config, $OutputQueue, $ModulesPath)
             
-            # Import modules
-            Import-Module "$ModulesPath\Logging.psm1" -Force -ErrorAction SilentlyContinue
-            Import-Module "$ModulesPath\RemoteConnection.psm1" -Force -ErrorAction SilentlyContinue
-            Import-Module "$ModulesPath\HealthMonitoring.psm1" -Force -ErrorAction SilentlyContinue
+            # Use consolidated RMSetup module instead of deprecated individual modules
+            Import-Module "$ModulesPath\RMSetup.psm1" -Force -ErrorAction SilentlyContinue
             
             $serverHealth = $null
             $containerHealth = $null
@@ -970,12 +967,12 @@ function Show-HealthMonitorWindow {
                 }
                 
                 # Update summary
-                $summaryText.Text = "Servers: $($ServerConfigs.Count) | ✅ Healthy: $healthyCount | ⚠️ Warning: $warningCount | ❌ Critical: $criticalCount | Last Updated: $(Get-Date -Format 'HH:mm:ss')"
+                $summaryText.Text = "Servers: $($ServerConfigs.Count) |   Healthy: $healthyCount |   Warning: $warningCount |   Critical: $criticalCount | Last Updated: $(Get-Date -Format 'HH:mm:ss')"
                 $statusBarText.Text = "Ready - Last refresh: $(Get-Date -Format 'HH:mm:ss')"
                 
                 # Re-enable button
                 $refreshButton.IsEnabled = $true
-                $refreshButton.Content = "🔄 Refresh All"
+                $refreshButton.Content = "  Refresh All"
                 $script:healthRefreshInProgress = $false
                 
                 Write-LogInfo -Message "Health data refreshed for $($script:healthResults.Count) server(s)" -Component "HealthMonitor"
@@ -1050,9 +1047,8 @@ function Show-HealthMonitorWindow {
         $reportScript = {
             param($Config, $OutputQueue, $ModulesPath)
             
-            Import-Module "$ModulesPath\Logging.psm1" -Force -ErrorAction SilentlyContinue
-            Import-Module "$ModulesPath\RemoteConnection.psm1" -Force -ErrorAction SilentlyContinue
-            Import-Module "$ModulesPath\HealthMonitoring.psm1" -Force -ErrorAction SilentlyContinue
+            # Use consolidated RMSetup module
+            Import-Module "$ModulesPath\RMSetup.psm1" -Force -ErrorAction SilentlyContinue
             
             try {
                 $fullReport = Get-FullHealthReport -IP $Config.IP -User $Config.User -Password $Config.Password
@@ -1113,7 +1109,7 @@ function Show-HealthMonitorWindow {
                         if ($line -match "Healthy|SUCCESS|running") { $color = "Green" }
                         elseif ($line -match "Critical|Error|FAILED|stopped") { $color = "Red" }
                         elseif ($line -match "Warning|Degraded") { $color = "Yellow" }
-                        elseif ($line -match "═|─|┌|┐|└|┘|│") { $color = "Cyan" }
+                        elseif ($line -match " ") { $color = "Cyan" }
                         
                         Write-ReportOutput -Message $line -Color $color
                     }
@@ -1182,9 +1178,8 @@ function Show-HealthMonitorWindow {
             $exportScript = {
                 param($Config, $OutputQueue, $ModulesPath)
                 
-                Import-Module "$ModulesPath\Logging.psm1" -Force -ErrorAction SilentlyContinue
-                Import-Module "$ModulesPath\RemoteConnection.psm1" -Force -ErrorAction SilentlyContinue
-                Import-Module "$ModulesPath\HealthMonitoring.psm1" -Force -ErrorAction SilentlyContinue
+                # Use consolidated RMSetup module
+                Import-Module "$ModulesPath\RMSetup.psm1" -Force -ErrorAction SilentlyContinue
                 
                 try {
                     $fullReport = Get-FullHealthReport -IP $Config.IP -User $Config.User -Password $Config.Password

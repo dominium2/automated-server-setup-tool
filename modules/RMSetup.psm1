@@ -608,21 +608,63 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
             if ([string]::IsNullOrWhiteSpace($line)) { continue }
             
             switch ($currentSection) {
-                "CPU" { if ($line -match '^\d+\.?\d*$') { $cpuUsage = [math]::Round([double]$line, 1) } }
-                "MEMORY" { $memParts = $line -split '\s+'; if ($memParts.Count -ge 3) { $memoryUsed = [double]$memParts[0]; $memoryTotal = [double]$memParts[1]; $memoryPercent = [math]::Round([double]$memParts[2], 1) } }
-                "DISK" { if ($line -match '^\d+\.?\d*$') { $diskPercent = [math]::Round([double]$line, 1) } }
-                "UPTIME" { $uptime = $line -replace '^up\s+', '' }
-                "LOAD" { $loadParts = $line -split '\s+'; if ($loadParts.Count -ge 3) { $load1 = $loadParts[0]; $load5 = $loadParts[1]; $load15 = $loadParts[2] } }
+                "CPU" { 
+                    if ($line -match '^-?\d+\.?\d*$') { 
+                        $cpuUsage = [math]::Round([double]$line, 1) 
+                    } 
+                }
+                "MEMORY" { 
+                    $memParts = $line -split '\s+'
+                    # SECURITY GUARD: Ensure the parsed strings are actually numbers before casting
+                    if ($memParts.Count -ge 3 -and $memParts[0] -match '^\d+\.?\d*$' -and $memParts[1] -match '^\d+\.?\d*$') { 
+                        $memoryUsed = [double]$memParts[0]
+                        $memoryTotal = [double]$memParts[1]
+                        if ($memParts[2] -match '^\d+\.?\d*$') {
+                            $memoryPercent = [math]::Round([double]$memParts[2], 1) 
+                        }
+                    } 
+                }
+                "DISK" { 
+                    if ($line -match '^\d+\.?\d*$') { 
+                        $diskPercent = [math]::Round([double]$line, 1) 
+                    } 
+                }
+                "UPTIME" { 
+                    if ($line -notmatch "^bash:") {
+                        $uptime = $line -replace '^up\s+', '' 
+                    }
+                }
+                "LOAD" { 
+                    $loadParts = $line -split '\s+'
+                    # Check if the load outputs are actually numbers (load format is like 0.01 0.05 0.00)
+                    if ($loadParts.Count -ge 3 -and $loadParts[0] -match '^\d+\.?\d*$') { 
+                        $load1 = $loadParts[0]
+                        $load5 = $loadParts[1]
+                        $load15 = $loadParts[2] 
+                    } 
+                }
             }
         }
         
         $status = "Healthy"; $statusColor = "Green"
-        if (($cpuUsage -and $cpuUsage -gt 90) -or ($memoryPercent -and $memoryPercent -gt 90) -or ($diskPercent -and $diskPercent -gt 90)) { $status = "Critical"; $statusColor = "Red" }
-        elseif (($cpuUsage -and $cpuUsage -gt 70) -or ($memoryPercent -and $memoryPercent -gt 70) -or ($diskPercent -and $diskPercent -gt 80)) { $status = "Warning"; $statusColor = "Yellow" }
+        
+        # Determine status, treating missing data ($null) safely
+        if (($cpuUsage -ne $null -and $cpuUsage -gt 90) -or ($memoryPercent -ne $null -and $memoryPercent -gt 90) -or ($diskPercent -ne $null -and $diskPercent -gt 90)) { 
+            $status = "Critical"; $statusColor = "Red" 
+        }
+        elseif (($cpuUsage -ne $null -and $cpuUsage -gt 70) -or ($memoryPercent -ne $null -and $memoryPercent -gt 70) -or ($diskPercent -ne $null -and $diskPercent -gt 80)) { 
+            $status = "Warning"; $statusColor = "Yellow" 
+        }
+        elseif ($cpuUsage -eq $null -and $memoryPercent -eq $null) {
+            # If we couldn't parse the metrics, degrade the status gracefully instead of crashing
+            $status = "Degraded"; $statusColor = "Yellow"
+        }
         
         return [PSCustomObject]@{ IP = $IP; OSType = "Linux"; Status = $status; StatusColor = $statusColor; CPU = [PSCustomObject]@{ UsagePercent = $cpuUsage }; Memory = [PSCustomObject]@{ UsedMB = $memoryUsed; TotalMB = $memoryTotal; UsagePercent = $memoryPercent }; Disk = [PSCustomObject]@{ UsagePercent = $diskPercent }; Uptime = $uptime; Load = [PSCustomObject]@{ Load1Min = $load1; Load5Min = $load5; Load15Min = $load15 }; LastChecked = Get-Date; ErrorMessage = $null }
     }
-    catch { return [PSCustomObject]@{ IP = $IP; OSType = "Linux"; Status = "Error"; StatusColor = "Red"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = $_.Exception.Message } }
+    catch { 
+        return [PSCustomObject]@{ IP = $IP; OSType = "Linux"; Status = "Error"; StatusColor = "Red"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = $_.Exception.Message } 
+    }
 }
 
 function Get-WindowsServerHealth {
