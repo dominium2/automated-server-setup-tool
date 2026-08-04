@@ -12,7 +12,6 @@
 
 #region Module Variables
 #-------------------------------------------------------------------------------
-
 # Logging configuration
 $script:LogFilePath = $null
 $script:LogLevel = "Info"
@@ -32,7 +31,6 @@ $script:LogLevels = @{
 
 # WSL2 reboot tracking (prevents infinite reboot loops)
 $script:WSL2RebootCount = @{}
-
 #endregion
 
 #===============================================================================
@@ -43,29 +41,21 @@ function Initialize-Logging {
     <#
     .SYNOPSIS
         Initializes the logging system with specified configuration.
-
     .DESCRIPTION
         Sets up the logging directory, log file, and configuration options.
         Should be called at the start of the application.
-
     .PARAMETER LogDirectory
         The directory where log files will be stored. Defaults to "logs" in script root.
-
     .PARAMETER LogLevel
         Minimum log level to record. Options: Debug, Info, Warning, Error.
-
     .PARAMETER LogToFile
         Whether to write logs to file. Default: $true
-
     .PARAMETER LogToConsole
         Whether to write logs to console. Default: $true
-
     .PARAMETER MaxLogFileSizeMB
         Maximum size of a single log file in MB before rotation. Default: 10
-
     .PARAMETER MaxLogFiles
         Maximum number of log files to keep. Default: 5
-
     .EXAMPLE
         Initialize-Logging -LogLevel "Debug" -LogToFile $true
     #>
@@ -160,26 +150,19 @@ function Write-Log {
     <#
     .SYNOPSIS
         Writes a log message to file and/or console.
-
     .DESCRIPTION
         Central logging function that formats and outputs log messages
         to configured destinations based on log level settings.
-
     .PARAMETER Message
         The log message to write.
-
     .PARAMETER Level
         The log level: Debug, Info, Warning, Error, Success.
-
     .PARAMETER Component
         The component or module generating the log message.
-
     .PARAMETER Exception
         Optional exception object to include in error logs.
-
     .EXAMPLE
         Write-Log -Message "Connection successful" -Level "Success" -Component "RemoteConnection"
-
     .EXAMPLE
         Write-Log -Message "Failed to connect" -Level "Error" -Component "SSH" -Exception $_.Exception
     #>
@@ -326,10 +309,8 @@ function Get-LogContent {
     <#
     .SYNOPSIS
         Returns the content of the current log file.
-
     .PARAMETER Tail
         Number of lines to return from end of file.
-
     .PARAMETER Level
         Filter by log level.
     #>
@@ -359,7 +340,6 @@ function Clear-OldLogs {
     <#
     .SYNOPSIS
         Clears log files older than specified days.
-
     .PARAMETER DaysToKeep
         Number of days of logs to keep.
     #>
@@ -374,7 +354,7 @@ function Clear-OldLogs {
     $logDir = Split-Path $script:LogFilePath -Parent
     $cutoffDate = (Get-Date).AddDays(-$DaysToKeep)
     
-    $oldFiles = Get-ChildItem -Path $logDir -Filter "automated-setup_*.log" |
+    $oldFiles = Get-ChildItem -Path $logDir -Filter "automated-setup_*.log" | 
                 Where-Object { $_.LastWriteTime -lt $cutoffDate }
     
     $deletedCount = 0
@@ -400,18 +380,15 @@ function Write-SessionSeparator {
     )
     
     $separator = @"
-
 ================================================================================
 === $SessionName - $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 ================================================================================
-
 "@
     
     if ($script:LogToFile -and -not [string]::IsNullOrEmpty($script:LogFilePath)) {
         Add-Content -Path $script:LogFilePath -Value $separator -Encoding UTF8
     }
 }
-
 #endregion
 
 #===============================================================================
@@ -643,7 +620,6 @@ function Test-RemoteConnection {
         [string]$User,
         [string]$Password
     )
-
     try {
         Write-LogInfo -Message "Testing connectivity to $IP" -Component "RemoteConnection"
         Write-Host "Testing connectivity to $IP..." -ForegroundColor Cyan
@@ -845,24 +821,18 @@ function Invoke-RemoteCommand {
     <#
     .SYNOPSIS
         Executes a command on a remote system (Linux via SSH or Windows via WSL2).
-
     .DESCRIPTION
         This function automatically detects the OS and routes commands appropriately:
         - Linux systems: Uses SSH (plink)
         - Windows systems: Uses WinRM to execute commands in WSL2
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .PARAMETER Command
         The Linux/bash command to execute.
-
     .EXAMPLE
         Invoke-RemoteCommand -IP "192.168.1.100" -User "admin" -Password "pass" -Command "docker --version"
     #>
@@ -945,7 +915,6 @@ function Invoke-RemoteCommand {
         return $null
     }
 }
-
 #endregion
 
 #===============================================================================
@@ -960,23 +929,17 @@ function Get-ServerHealth {
     <#
     .SYNOPSIS
         Gets comprehensive health information for a remote server.
-
     .DESCRIPTION
         Collects CPU usage, memory usage, disk usage, uptime, and system load
         from a remote server via SSH (Linux) or WinRM (Windows).
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .EXAMPLE
         Get-ServerHealth -IP "192.168.1.100" -User "admin" -Password "password123"
-
     .OUTPUTS
         PSCustomObject with health metrics including Status, CPU, Memory, Disk, Uptime, Load
     #>
@@ -1078,7 +1041,6 @@ echo '===DISK===' && df -h / | awk 'NR==2{print `$5}' | tr -d '%' && \
 echo '===UPTIME===' && uptime -p && \
 echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
 "@
-
         $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $healthCommand
         
         if ($null -eq $result) {
@@ -1358,29 +1320,21 @@ function Get-ContainerHealth {
     <#
     .SYNOPSIS
         Gets health information for Docker containers on a remote server.
-
     .DESCRIPTION
         Lists all Docker containers and their health status, resource usage,
         and restart counts on a remote server.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .PARAMETER ContainerName
         Optional. If specified, only returns health for this container.
-
     .EXAMPLE
         Get-ContainerHealth -IP "192.168.1.100" -User "admin" -Password "password123"
-
     .EXAMPLE
         Get-ContainerHealth -IP "192.168.1.100" -User "admin" -Password "password123" -ContainerName "nginx"
-
     .OUTPUTS
         Array of PSCustomObjects with container health information
     #>
@@ -1583,28 +1537,20 @@ function Get-ContainerLogs {
     <#
     .SYNOPSIS
         Gets logs from a Docker container.
-
     .DESCRIPTION
         Retrieves the last N lines of logs from a specified Docker container.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .PARAMETER ContainerName
         The name or ID of the container.
-
     .PARAMETER Tail
         Number of lines to retrieve from the end. Default: 100
-
     .PARAMETER Since
         Only return logs since this time (e.g., "10m", "1h", "2023-01-01")
-
     .EXAMPLE
         Get-ContainerLogs -IP "192.168.1.100" -User "admin" -Password "pass" -ContainerName "nginx" -Tail 50
     #>
@@ -1670,19 +1616,14 @@ function Restart-Container {
     <#
     .SYNOPSIS
         Restarts a Docker container.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .PARAMETER ContainerName
         The name or ID of the container to restart.
-
     .EXAMPLE
         Restart-Container -IP "192.168.1.100" -User "admin" -Password "pass" -ContainerName "nginx"
     #>
@@ -1730,19 +1671,14 @@ function Stop-Container {
     <#
     .SYNOPSIS
         Stops a Docker container.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .PARAMETER ContainerName
         The name or ID of the container to stop.
-
     .EXAMPLE
         Stop-Container -IP "192.168.1.100" -User "admin" -Password "pass" -ContainerName "nginx"
     #>
@@ -1790,19 +1726,14 @@ function Start-Container {
     <#
     .SYNOPSIS
         Starts a Docker container.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .PARAMETER ContainerName
         The name or ID of the container to start.
-
     .EXAMPLE
         Start-Container -IP "192.168.1.100" -User "admin" -Password "pass" -ContainerName "nginx"
     #>
@@ -1854,19 +1785,14 @@ function Get-FullHealthReport {
     <#
     .SYNOPSIS
         Gets a comprehensive health report for a server including both system and container health.
-
     .DESCRIPTION
         Combines server health metrics and container health into a single comprehensive report.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .EXAMPLE
         Get-FullHealthReport -IP "192.168.1.100" -User "admin" -Password "password123"
     #>
@@ -1935,16 +1861,12 @@ function Format-HealthReport {
     <#
     .SYNOPSIS
         Formats a health report for display.
-
     .DESCRIPTION
         Takes a health report object and formats it for console or GUI display.
-
     .PARAMETER HealthReport
         The health report object from Get-FullHealthReport.
-
     .PARAMETER OutputFormat
         Format type: "Console", "Simple", or "Detailed". Default: "Console"
-
     .EXAMPLE
         Get-FullHealthReport -IP "192.168.1.100" -User "admin" -Password "pass" | Format-HealthReport
     #>
@@ -1958,63 +1880,64 @@ function Format-HealthReport {
     
     $output = @()
     
-    $output += ""
-    $output += "═══════════════════════════════════════════════════════════════"
+    $output += "================================================================================"
     $output += "  HEALTH REPORT: $($HealthReport.IP)"
     $output += "  Generated: $($HealthReport.ReportGeneratedAt.ToString('yyyy-MM-dd HH:mm:ss'))"
     $output += "  Overall Status: $($HealthReport.OverallStatus)"
-    $output += "═══════════════════════════════════════════════════════════════"
+    $output += "================================================================================"
     
     if ($HealthReport.Server) {
         $s = $HealthReport.Server
         $output += ""
-        $output += "┌─ SERVER HEALTH ─────────────────────────────────────────────┐"
-        $output += "│  Status: $($s.Status)"
+        $output += "  SERVER HEALTH"
+        $output += "  ------------------------------------------------------------------------------"
+        $output += "   Status: $($s.Status)"
         if ($s.CPU) {
-            $output += "│  CPU Usage: $($s.CPU.UsagePercent)%"
+            $output += "   CPU Usage: $($s.CPU.UsagePercent)%"
         }
         if ($s.Memory) {
-            $output += "│  Memory: $($s.Memory.UsedMB)MB / $($s.Memory.TotalMB)MB ($($s.Memory.UsagePercent)%)"
+            $output += "   Memory: $($s.Memory.UsedMB)MB / $($s.Memory.TotalMB)MB ($($s.Memory.UsagePercent)%)"
         }
         if ($s.Disk) {
-            $output += "│  Disk Usage: $($s.Disk.UsagePercent)%"
+            $output += "   Disk Usage: $($s.Disk.UsagePercent)%"
         }
         if ($s.Uptime) {
-            $output += "│  Uptime: $($s.Uptime)"
+            $output += "   Uptime: $($s.Uptime)"
         }
         if ($s.Load -and $s.Load.Load1Min) {
-            $output += "│  Load Average: $($s.Load.Load1Min) / $($s.Load.Load5Min) / $($s.Load.Load15Min)"
+            $output += "   Load Average: $($s.Load.Load1Min) / $($s.Load.Load5Min) / $($s.Load.Load15Min)"
         }
-        $output += "└─────────────────────────────────────────────────────────────┘"
+        $output += "  ------------------------------------------------------------------------------"
     }
     
     if ($HealthReport.Containers) {
         $c = $HealthReport.Containers
         $output += ""
-        $output += "┌─ CONTAINER HEALTH ──────────────────────────────────────────┐"
-        $output += "│  Status: $($c.Status)"
-        $output += "│  Total: $($c.TotalContainers) | Running: $($c.RunningContainers) | Stopped: $($c.StoppedContainers)"
-        $output += "│"
+        $output += "  CONTAINER HEALTH"
+        $output += "  ------------------------------------------------------------------------------"
+        $output += "   Status: $($c.Status)"
+        $output += "   Total: $($c.TotalContainers) | Running: $($c.RunningContainers) | Stopped: $($c.StoppedContainers)"
+        $output += "  ------------------------------------------------------------------------------"
         
         if ($c.Containers -and $c.Containers.Count -gt 0) {
             foreach ($container in $c.Containers) {
-                $stateIcon = if ($container.State -eq "running") { "●" } else { "○" }
-                $output += "│  $stateIcon $($container.Name)"
-                $output += "│    Image: $($container.Image)"
-                $output += "│    Status: $($container.Status)"
+                $stateIcon = if ($container.State -eq "running") { "[RUNNING]" } else { "[STOPPED]" }
+                $output += "   $stateIcon $($container.Name)"
+                $output += "     Image: $($container.Image)"
+                $output += "     Status: $($container.Status)"
                 if ($container.State -eq "running" -and $container.CPUPercent) {
-                    $output += "│    CPU: $($container.CPUPercent)% | Memory: $($container.MemoryUsage) ($($container.MemoryPercent)%)"
+                    $output += "     CPU: $($container.CPUPercent)% | Memory: $($container.MemoryUsage) ($($container.MemoryPercent)%)"
                 }
                 if ($container.RestartCount -gt 0) {
-                    $output += "│    Restarts: $($container.RestartCount)"
+                    $output += "     Restarts: $($container.RestartCount)"
                 }
-                $output += "│"
+                $output += "  ------------------------------------------------------------------------------"
             }
         }
         else {
-            $output += "│  No containers found"
+            $output += "   No containers found"
         }
-        $output += "└─────────────────────────────────────────────────────────────┘"
+        $output += "================================================================================"
     }
     
     $output += ""
@@ -2030,25 +1953,18 @@ function Test-ServiceHealth {
     <#
     .SYNOPSIS
         Tests if a specific service/port is accessible and responding.
-
     .DESCRIPTION
         Performs a TCP connection test and optionally an HTTP health check.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER Port
         The port to check.
-
     .PARAMETER ServiceName
         Friendly name of the service (for logging/display).
-
     .PARAMETER HttpPath
         Optional HTTP path to check for HTTP-based services.
-
     .EXAMPLE
         Test-ServiceHealth -IP "192.168.1.100" -Port 80 -ServiceName "Web Server"
-
     .EXAMPLE
         Test-ServiceHealth -IP "192.168.1.100" -Port 8080 -ServiceName "API" -HttpPath "/health"
     #>
@@ -2154,13 +2070,10 @@ function Test-CommonServices {
     <#
     .SYNOPSIS
         Tests common services that might be running on the server.
-
     .DESCRIPTION
         Checks common ports/services like SSH, HTTP, HTTPS, Docker API, etc.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .EXAMPLE
         Test-CommonServices -IP "192.168.1.100"
     #>
@@ -2206,33 +2119,25 @@ function Install-AdGuard {
     <#
     .SYNOPSIS
         Installs AdGuard Home on a Debian-based system.
-
     .DESCRIPTION
         This function installs AdGuard Home, a network-wide ad and tracker blocking DNS server, on a Debian-based system
         via SSH. It checks for existing installations and installs AdGuard Home if not present.
-
     .PARAMETER IP
         The IP address of the target Debian server.
-
     .PARAMETER User
         The username for SSH authentication.
-
     .PARAMETER Password
         The password for SSH authentication.
-
     .PARAMETER Domain
         Base domain for Traefik routing (e.g., "example.com"). AdGuard will be accessible at adguard.example.com
-
     .EXAMPLE
         Install-AdGuard -IP "192.168.1.100" -User "admin" -Password "password123" -Domain "homelab.local"
-
     .NOTES
         Requires Traefik to be installed first for reverse proxy functionality.
         Requires plink (PuTTY) to be installed for SSH connectivity.
         Connection should already be validated before calling this function.
         Docker must be installed before running this function.
     #>
-
     param(
         [Parameter(Mandatory=$true)]
         [string]$IP,
@@ -2242,14 +2147,11 @@ function Install-AdGuard {
         
         [Parameter(Mandatory=$true)]
         [string]$Password,
-
         [Parameter(Mandatory=$false)]
         [string]$Domain = "localhost"
     )
-
     try {
         Write-Host "`nStarting AdGuard Home installation on $IP..." -ForegroundColor Cyan
-
         # Check if plink is available
         if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
             Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
@@ -2271,7 +2173,6 @@ function Install-AdGuard {
             
             return $result
         }
-
         # Create AdGuard directory structure
         Write-Host "Creating AdGuard Home directory structure..." -ForegroundColor Cyan
         Invoke-SSHCommand "mkdir -p /home/$User/adguard/work /home/$User/adguard/conf" | Out-Null
@@ -2387,33 +2288,25 @@ function Install-Crafty {
     <#
     .SYNOPSIS
         Installs Crafty Controller on a Debian-based system.
-
     .DESCRIPTION
         This function installs Crafty Controller, a powerful and easy-to-use Minecraft server management panel, on a Debian-based system
         via SSH. It checks for existing installations and installs Crafty Controller if not present.
-
     .PARAMETER IP
         The IP address of the target Debian server.
-
     .PARAMETER User
         The username for SSH authentication.
-
     .PARAMETER Password
         The password for SSH authentication.
-
     .PARAMETER Domain
         Base domain for Traefik routing (e.g., "example.com"). Crafty will be accessible at crafty.example.com
-
     .EXAMPLE
         Install-Crafty -IP "192.168.1.100" -User "admin" -Password "password123" -Domain "homelab.local"
-
     .NOTES
         Requires Traefik to be installed first for reverse proxy functionality.
         Requires plink (PuTTY) to be installed for SSH connectivity.
         Connection should already be validated before calling this function.
         Docker must be installed before running this function.
     #>
-
     param(
         [Parameter(Mandatory=$true)]
         [string]$IP,
@@ -2423,14 +2316,11 @@ function Install-Crafty {
         
         [Parameter(Mandatory=$true)]
         [string]$Password,
-
         [Parameter(Mandatory=$false)]
         [string]$Domain = "localhost"
     )
-
     try {
         Write-Host "`nStarting Crafty Controller installation on $IP..." -ForegroundColor Cyan
-
         # Check if plink is available
         if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
             Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
@@ -2452,7 +2342,6 @@ function Install-Crafty {
             
             return $result
         }
-
         # Create Crafty directory structure
         Write-Host "Creating Crafty Controller directory structure..." -ForegroundColor Cyan
         Invoke-SSHCommand "mkdir -p /home/$User/crafty/backups /home/$User/crafty/logs /home/$User/crafty/servers /home/$User/crafty/config" | Out-Null
@@ -2580,29 +2469,22 @@ function Install-Docker {
     <#
     .SYNOPSIS
         Installs Docker on a Debian-based system or Windows WSL2.
-
     .DESCRIPTION
         This function installs Docker Engine on a Debian-based system via SSH
         or on Windows via WSL2. It automatically detects the OS and uses the
         appropriate connection method.
-
     .PARAMETER IP
         The IP address of the target server.
-
     .PARAMETER User
         The username for authentication.
-
     .PARAMETER Password
         The password for authentication.
-
     .EXAMPLE
         Install-Docker -IP "192.168.1.100" -User "admin" -Password "password123"
-
     .NOTES
         Requires either plink (PuTTY) for Linux or WinRM access for Windows.
         Connection should already be validated before calling this function.
     #>
-
     param(
         [Parameter(Mandatory=$true)]
         [string]$IP,
@@ -2766,33 +2648,25 @@ function Install-Heimdall {
     <#
     .SYNOPSIS
         Installs Heimdall on a Debian-based system.
-
     .DESCRIPTION
         This function installs Heimdall, an application dashboard for organizing your web applications,
         on a Debian-based system via SSH. It checks for existing installations and installs Heimdall if not present.
-
     .PARAMETER IP
         The IP address of the target Debian server.
-
     .PARAMETER User
         The username for SSH authentication.
-
     .PARAMETER Password
         The password for SSH authentication.
-
     .PARAMETER Domain
         Base domain for Traefik routing (e.g., "example.com"). Heimdall will be accessible at heimdall.example.com
-
     .EXAMPLE
         Install-Heimdall -IP "192.168.1.100" -User "admin" -Password "password123" -Domain "homelab.local"
-
     .NOTES
         Requires Traefik to be installed first for reverse proxy functionality.
         Requires plink (PuTTY) to be installed for SSH connectivity.
         Connection should already be validated before calling this function.
         Docker must be installed before running this function.
     #>
-
     param(
         [Parameter(Mandatory=$true)]
         [string]$IP,
@@ -2802,14 +2676,11 @@ function Install-Heimdall {
         
         [Parameter(Mandatory=$true)]
         [string]$Password,
-
         [Parameter(Mandatory=$false)]
         [string]$Domain = "localhost"
     )
-
     try {
         Write-Host "`nStarting Heimdall installation on $IP..." -ForegroundColor Cyan
-
         # Check if plink is available
         if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
             Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
@@ -2831,7 +2702,6 @@ function Install-Heimdall {
             
             return $result
         }
-
         # Create Heimdall directory structure
         Write-Host "Creating Heimdall directory structure..." -ForegroundColor Cyan
         Invoke-SSHCommand "mkdir -p /home/$User/heimdall/config" | Out-Null
@@ -2950,33 +2820,25 @@ function Install-N8N {
     <#
     .SYNOPSIS
         Installs n8n on a Debian-based system.
-
     .DESCRIPTION
         This function installs n8n, a workflow automation tool, on a Debian-based system
         via SSH. It checks for existing installations and installs n8n if not present.
-
     .PARAMETER IP
         The IP address of the target Debian server.
-
     .PARAMETER User
         The username for SSH authentication.
-
     .PARAMETER Password
         The password for SSH authentication.
-
     .PARAMETER Domain
         Base domain for Traefik routing (e.g., "example.com"). n8n will be accessible at n8n.example.com
-
     .EXAMPLE
         Install-N8N -IP "192.168.1.100" -User "admin" -Password "password123" -Domain "homelab.local"
-
     .NOTES
         Requires Traefik to be installed first for reverse proxy functionality.
         Requires plink (PuTTY) to be installed for SSH connectivity.
         Connection should already be validated before calling this function.
         Docker must be installed before running this function.
     #>
-
     param(
         [Parameter(Mandatory=$true)]
         [string]$IP,
@@ -2986,14 +2848,11 @@ function Install-N8N {
         
         [Parameter(Mandatory=$true)]
         [string]$Password,
-
         [Parameter(Mandatory=$false)]
         [string]$Domain = "localhost"
     )
-
     try {
         Write-Host "`nStarting n8n installation on $IP..." -ForegroundColor Cyan
-
         # Check if plink is available
         if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
             Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
@@ -3015,7 +2874,6 @@ function Install-N8N {
             
             return $result
         }
-
         # Create n8n directory structure
         Write-Host "Creating n8n directory structure..." -ForegroundColor Cyan
         Invoke-SSHCommand "mkdir -p /home/$User/n8n/data" | Out-Null
@@ -3130,33 +2988,25 @@ function Install-Portainer {
     <#
     .SYNOPSIS
         Installs Portainer on a Debian-based system.
-
     .DESCRIPTION
         This function installs Portainer, a lightweight management UI for Docker, on a Debian-based system
         via SSH. It checks for existing installations and installs Portainer if not present.
-
     .PARAMETER IP
         The IP address of the target Debian server.
-
     .PARAMETER User
         The username for SSH authentication.
-
     .PARAMETER Password
         The password for SSH authentication.
-
     .PARAMETER Domain
         Base domain for Traefik routing (e.g., "example.com"). Portainer will be accessible at portainer.example.com
-
     .EXAMPLE
         Install-Portainer -IP "192.168.1.100" -User "admin" -Password "password123" -Domain "homelab.local"
-
     .NOTES
         Requires Traefik to be installed first for reverse proxy functionality.
         Requires plink (PuTTY) to be installed for SSH connectivity.
         Connection should already be validated before calling this function.
         Docker must be installed before running this function.
     #>
-
     param(
         [Parameter(Mandatory=$true)]
         [string]$IP,
@@ -3166,14 +3016,11 @@ function Install-Portainer {
         
         [Parameter(Mandatory=$true)]
         [string]$Password,
-
         [Parameter(Mandatory=$false)]
         [string]$Domain = "localhost"
     )
-
     try {
         Write-Host "`nStarting Portainer installation on $IP..." -ForegroundColor Cyan
-
         # Check if plink is available
         if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
             Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
@@ -3195,7 +3042,6 @@ function Install-Portainer {
             
             return $result
         }
-
         # Create Portainer directory structure
         Write-Host "Creating Portainer directory structure..." -ForegroundColor Cyan
         Invoke-SSHCommand "mkdir -p /home/$User/portainer" | Out-Null
@@ -3312,35 +3158,26 @@ function Install-Traefik {
     <#
     .SYNOPSIS
         Installs Traefik reverse proxy on a Debian-based system.
-
     .DESCRIPTION
         This function installs Traefik, a modern reverse proxy and load balancer, on a Debian-based system.
         Traefik will manage all other services through automatic service discovery and SSL certificates.
-
     .PARAMETER IP
         The IP address of the target Debian server.
-
     .PARAMETER User
         The username for SSH authentication.
-
     .PARAMETER Password
         The password for SSH authentication.
-
     .PARAMETER Email
         Email address for Let's Encrypt SSL certificates.
-
     .PARAMETER Domain
         Base domain for services (e.g., "example.com").
-
     .EXAMPLE
         Install-Traefik -IP "192.168.1.100" -User "admin" -Password "password123" -Email "admin@example.com" -Domain "homelab.local"
-
     .NOTES
         Requires plink (PuTTY) to be installed for SSH connectivity.
         Connection should already be validated before calling this function.
         Docker must be installed before running this function.
     #>
-
     param(
         [Parameter(Mandatory=$true)]
         [string]$IP,
@@ -3350,10 +3187,8 @@ function Install-Traefik {
         
         [Parameter(Mandatory=$true)]
         [string]$Password,
-
         [Parameter(Mandatory=$false)]
         [string]$Email = "admin@localhost",
-
         [Parameter(Mandatory=$false)]
         [string]$Domain = "localhost"
     )
@@ -3408,7 +3243,6 @@ function Install-Traefik {
 api:
   dashboard: true
   insecure: true
-
 entryPoints:
   web:
     address: ':80'
@@ -3422,13 +3256,11 @@ entryPoints:
     http:
       tls:
         certResolver: letsencrypt
-
 providers:
   docker:
     endpoint: 'unix:///var/run/docker.sock'
     exposedByDefault: false
     network: traefik-network
-
 certificatesResolvers:
   letsencrypt:
     acme:
@@ -3436,7 +3268,6 @@ certificatesResolvers:
       storage: /letsencrypt/acme.json
       httpChallenge:
         entryPoint: web
-
 log:
   level: INFO
 "@
@@ -3532,7 +3363,6 @@ networks:
         return $false
     }
 }
-
 #endregion
 
 #===============================================================================
@@ -3543,7 +3373,7 @@ function Test-WSLReady {
     <#
     .SYNOPSIS
         Tests if WSL2 is ready and fully functional on a remote Windows system.
-    
+        
     .DESCRIPTION
         Checks if WSL2 features are enabled, kernel is installed, and a distribution is available.
         Returns a detailed status object.
@@ -3600,13 +3430,6 @@ function Test-WSLReady {
             
             # Check if reboot is pending for VM Platform feature
             if ($vmStatus.RestartNeeded -eq $true) {
-                $result.NeedsReboot = $true
-            }
-            
-            # Check for pending reboot in registry
-            $rebootPending = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
-            $rebootRequired = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-            if ($rebootPending -or $rebootRequired) {
                 $result.NeedsReboot = $true
             }
             
@@ -3719,10 +3542,9 @@ function Install-WSL2 {
         [switch]$AutoReboot,
         [switch]$WaitForReboot
     )
-
     try {
         Write-Host "Starting WSL2 installation on $IP..." -ForegroundColor Cyan
-
+        
         # First, check current WSL2 status
         Write-Host "  Checking current WSL2 status..." -ForegroundColor Cyan
         $wslStatus = Test-WSLReady -IP $IP -User $User -Password $Password -Distribution $Distribution
@@ -3760,18 +3582,18 @@ function Install-WSL2 {
         }
         
         Write-Host "  Current status: $($wslStatus.Message)" -ForegroundColor Yellow
-
+        
         # Create credential object
         $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
         $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
-
+        
         # Create session options
         $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
-
+        
         # Establish remote session
         Write-Host "  Establishing remote session..." -ForegroundColor Cyan
         $session = New-PSSession -ComputerName $IP -Credential $credential -SessionOption $sessionOption -ErrorAction Stop
-
+        
         if (-not $session) {
             Write-Host "Failed to establish remote session" -ForegroundColor Red
             return @{
@@ -3781,7 +3603,7 @@ function Install-WSL2 {
                 Message = "Failed to establish remote session"
             }
         }
-
+        
         # Execute installation on remote system
         $installResult = Invoke-Command -Session $session -ScriptBlock {
             param($DistroName)
@@ -3810,7 +3632,7 @@ function Install-WSL2 {
                 else {
                     Write-Host "  WSL feature is already enabled" -ForegroundColor Green
                 }
-
+                
                 # Check and enable Virtual Machine Platform feature (required for WSL2)
                 Write-Host "  Checking Virtual Machine Platform feature..." -ForegroundColor Cyan
                 $vmPlatformStatus = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
@@ -3830,21 +3652,14 @@ function Install-WSL2 {
                 else {
                     Write-Host "  Virtual Machine Platform is already enabled" -ForegroundColor Green
                 }
-
-                # Check if reboot is required
+                
+                # Check if reboot is required by the explicitly requested features
                 $rebootRequired = $false
                 if ($wslStatus.State -ne "Enabled" -or $vmPlatformStatus.State -ne "Enabled") {
                     $rebootRequired = $true
                 }
                 
-                # Check for pending reboot in registry BEFORE attempting kernel install
-                $rebootPending = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
-                $rebootReq = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-                if ($rebootPending -or $rebootReq) {
-                    $rebootRequired = $true
-                }
-                
-                # Test if WSL is actually functional (not just "enabled" in features)
+                # Test if WSL is actually functional
                 Write-Host "  Testing WSL functionality..." -ForegroundColor Cyan
                 $wslFunctional = $false
                 try {
@@ -3873,7 +3688,7 @@ function Install-WSL2 {
                         Message = "WSL2 features enabled. System reboot required before continuing."
                     }
                 }
-
+                
                 # Update WSL using the modern method (wsl --update)
                 Write-Host "  Updating WSL to latest version..." -ForegroundColor Cyan
                 try {
@@ -3903,7 +3718,7 @@ function Install-WSL2 {
                 # Install WSL if not yet installed (uses wsl --install which handles everything)
                 Write-Host "  Ensuring WSL is fully installed..." -ForegroundColor Cyan
                 try {
-                    $wslInstallOutput = & wsl --install --no-launch 2>&1
+                    $wslInstallOutput = & wsl --install --web-download --no-launch 2>&1
                     if ($LASTEXITCODE -eq 0 -or $wslInstallOutput -match "already installed") {
                         Write-Host "  WSL installation verified" -ForegroundColor Green
                     }
@@ -3914,7 +3729,7 @@ function Install-WSL2 {
                 catch {
                     Write-Host "  Warning: wsl --install failed: $($_.Exception.Message)" -ForegroundColor Yellow
                 }
-
+                
                 # Set WSL2 as default version
                 Write-Host "  Setting WSL2 as default version..." -ForegroundColor Cyan
                 try {
@@ -3943,7 +3758,7 @@ function Install-WSL2 {
                     }
                 }
                 Write-Host "  WSL is functional" -ForegroundColor Green
-
+                
                 # Install Linux distribution
                 if ($DistroName -and $DistroName -ne "") {
                     Write-Host "  Checking for Linux distribution: $DistroName..." -ForegroundColor Cyan
@@ -3998,7 +3813,7 @@ function Install-WSL2 {
                         Write-Host "  Note: This requires internet connectivity and may take several minutes..." -ForegroundColor Cyan
                         
                         # Use wsl --install to install the distribution
-                        $installOutput = & wsl --install -d $DistroName --no-launch 2>&1
+                        $installOutput = & wsl --install -d $DistroName --web-download --no-launch 2>&1
                         
                         # Wait longer for installation to complete
                         Write-Host "  Waiting for $DistroName installation to complete..." -ForegroundColor Cyan
@@ -4034,12 +3849,14 @@ function Install-WSL2 {
                         else {
                             Write-Host "  Error: $DistroName installation failed" -ForegroundColor Red
                             Write-Host "  Installation output: $installOutput" -ForegroundColor Yellow
-                            Write-Host "  Please install manually: wsl --install -d $DistroName" -ForegroundColor Yellow
-                            Write-Host "  Or install from Microsoft Store" -ForegroundColor Yellow
+                            Write-Host "  Please install manually: Connect to the VM and run 'wsl --install -d $DistroName'" -ForegroundColor Yellow
+                            
+                            # Critical Fix: Mark installation as failed
+                            $installSuccess = $false
                         }
                     }
                 }
-
+                
                 # Return installation result
                 # Check again for reboot requirement after installation
                 $wslStatusAfter = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
@@ -4047,23 +3864,18 @@ function Install-WSL2 {
                 
                 $rebootRequired = ($wslStatusAfter.RestartNeeded -eq $true) -or ($vmStatusAfter.RestartNeeded -eq $true) -or $rebootRequired
                 
-                # Also check registry for pending reboot
-                $rebootPending = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
-                $rebootReq = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-                if ($rebootPending -or $rebootReq) {
-                    $rebootRequired = $true
-                }
-                
-                $message = if ($rebootRequired) {
+                $message = if (-not $installSuccess) {
+                    "WSL2 distribution installation failed. Manual intervention required."
+                } elseif ($rebootRequired) {
                     "WSL2 components installed successfully. System reboot is required to complete installation."
                 } else {
                     "WSL2 installation completed successfully."
                 }
-
+                
                 return @{
                     Success = $installSuccess
                     NeedsReboot = $rebootRequired
-                    Ready = (-not $rebootRequired)
+                    Ready = (-not $rebootRequired -and $installSuccess)
                     Message = $message
                 }
             }
@@ -4077,10 +3889,10 @@ function Install-WSL2 {
                 }
             }
         } -ArgumentList $Distribution
-
+        
         # Close the session
         Remove-PSSession -Session $session
-
+        
         # Process results
         if ($installResult.Success) {
             Write-Host "WSL2 installation completed on $IP" -ForegroundColor Green
@@ -4148,7 +3960,7 @@ function Invoke-WSL2Reboot {
     <#
     .SYNOPSIS
         Reboots a remote Windows system and optionally waits for it to come back online.
-    
+        
     .DESCRIPTION
         Initiates a reboot on the remote system and can wait for the system to come back online
         before checking WSL2 status again. Includes protection against infinite reboot loops.
@@ -4319,7 +4131,6 @@ function Invoke-WSL2Reboot {
         }
     }
 }
-
 #endregion
 
 #===============================================================================
@@ -4377,5 +4188,4 @@ Export-ModuleMember -Function @(
     'Install-WSL2',
     'Invoke-WSL2Reboot'
 )
-
 #endregion

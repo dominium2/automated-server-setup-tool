@@ -2,7 +2,7 @@
 # vi: set ft=ruby :
 
 Vagrant.configure("2") do |config|
-  
+
   # Define 2 Linux (Debian) test servers
   (1..2).each do |i|
     config.vm.define "linux#{i}" do |server|
@@ -46,7 +46,7 @@ Vagrant.configure("2") do |config|
       SHELL
     end
   end
-  
+
   # Define 2 Windows test servers
   (1..2).each do |i|
     config.vm.define "windows#{i}" do |server|
@@ -62,6 +62,7 @@ Vagrant.configure("2") do |config|
         vb.memory = "2048"
         vb.cpus = 2
         vb.gui = false
+        vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
       end
       
       # Configure WinRM
