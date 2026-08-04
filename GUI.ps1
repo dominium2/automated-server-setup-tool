@@ -7,6 +7,40 @@ Add-Type -AssemblyName WindowsBase
 $scriptRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Definition }
 if (-not $scriptRoot) { $scriptRoot = Get-Location }
 
+# --- NEW: INITIALIZE SERVICE CONFIGS ---
+$servicesDir = Join-Path $scriptRoot "configs\services"
+if (-not (Test-Path $servicesDir)) {
+    New-Item -ItemType Directory -Path $servicesDir -Force | Out-Null
+    
+    $defaultPortainer = @"
+services:
+  portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:lts
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data
+    expose:
+      - 9443
+    networks:
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.portainer.rule=Host('portainer.localhost')"
+      - "traefik.http.routers.portainer.entrypoints=websecure"
+      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
+      - "traefik.http.services.portainer.loadbalancer.server.port=9443"
+      - "traefik.http.services.portainer.loadbalancer.server.scheme=https"
+networks:
+  traefik-network:
+    external: true
+"@
+    $defaultPortainer | Out-File (Join-Path $servicesDir "Portainer.yml") -Encoding UTF8
+    # You can add the other defaults here, or manually create them using the new GUI manager
+}
+# ---------------------------------------
+
 # Load the consolidated RMSetup module (contains all functionality)
 # - Logging functions
 # - Remote connection functions (SSH, WinRM, WSL)
@@ -42,7 +76,8 @@ Write-LogInfo -Message "Application started" -Component "GUI"
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
             <Button Name="AddServerButton" Content="Add Server" Width="120" Height="35" Margin="0,0,10,0" FontSize="14"/>
             <Button Name="RunSetupButton" Content="Run Setup" Width="120" Height="35" Background="Green" Foreground="White" FontSize="14" Margin="0,0,10,0"/>
-            <Button Name="HealthMonitorButton" Content="Health Monitor" Width="130" Height="35" Background="#2196F3" Foreground="White" FontSize="14"/>
+            <Button Name="HealthMonitorButton" Content="Health Monitor" Width="130" Height="35" Background="#2196F3" Foreground="White" FontSize="14" Margin="0,0,10,0"/>
+            <Button Name="ManageServicesButton" Content="Manage Services" Width="130" Height="35" Background="#9C27B0" Foreground="White" FontSize="14"/>
         </StackPanel>
         
         <!-- Server Container with ScrollViewer -->
@@ -199,26 +234,30 @@ function Add-ServerBox {
     [void]$grid.Children.Add($passwordBox)
     
     # Service Field
-    $serviceLabel = New-Object System.Windows.Controls.Label
-    $serviceLabel.Content = "Service:"
-    $serviceLabel.VerticalAlignment = "Center"
-    $serviceLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3)
-    [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0)
-    [void]$grid.Children.Add($serviceLabel)
-    
-    $serviceComboBox = New-Object System.Windows.Controls.ComboBox
-    $serviceComboBox.Height = 25
-    $serviceComboBox.Margin = "0,5"
-    $serviceComboBox.Name = "ServiceField$($script:serverCount)"
-    @("Portainer", "AdGuard", "N8N", "Heimdall", "Crafty") | ForEach-Object {
-        $item = New-Object System.Windows.Controls.ComboBoxItem
-        $item.Content = $_
-        [void]$serviceComboBox.Items.Add($item)
-    }
-    [System.Windows.Controls.Grid]::SetRow($serviceComboBox, 3)
-    [System.Windows.Controls.Grid]::SetColumn($serviceComboBox, 1)
-    [void]$grid.Children.Add($serviceComboBox)
+        $serviceLabel = New-Object System.Windows.Controls.Label
+        $serviceLabel.Content = "Service:"
+        $serviceLabel.VerticalAlignment = "Center"
+        $serviceLabel.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3)
+        [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0)
+        [void]$grid.Children.Add($serviceLabel)
+        
+        $serviceComboBox = New-Object System.Windows.Controls.ComboBox
+        $serviceComboBox.Height = 25
+        $serviceComboBox.Margin = "0,5"
+        $serviceComboBox.Name = "ServiceField$($script:serverCount)"
+        
+        # --- NEW: LOAD DYNAMIC SERVICES ---
+        $serviceFiles = Get-ChildItem -Path $servicesDir -Filter "*.yml"
+        foreach ($file in $serviceFiles) {
+            $item = New-Object System.Windows.Controls.ComboBoxItem
+            $item.Content = $file.BaseName
+            [void]$serviceComboBox.Items.Add($item)
+        }
+        
+        [System.Windows.Controls.Grid]::SetRow($serviceComboBox, 3)
+        [System.Windows.Controls.Grid]::SetColumn($serviceComboBox, 1)
+        [void]$grid.Children.Add($serviceComboBox)
     
     # Add grid to GroupBox
     $groupBox.Content = $grid
@@ -344,6 +383,7 @@ $window = [Windows.Markup.XamlReader]::Load( $reader )
 $addServerButton = $window.FindName("AddServerButton")
 $runSetupButton = $window.FindName("RunSetupButton")
 $healthMonitorButton = $window.FindName("HealthMonitorButton")
+$manageServicesButton = $window.FindName("ManageServicesButton")
 $serverContainer = $window.FindName("ServerContainer")
 $clearOutputButton = $window.FindName("ClearOutputButton")
 $simpleTerminalButton = $window.FindName("SimpleTerminalButton")
@@ -1296,6 +1336,90 @@ function Show-HealthMonitorWindow {
     $healthWindow.ShowDialog() | Out-Null
 }
 
+function Show-ManageServicesWindow {
+    [xml]$manageXaml = @"
+<Window 
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    Title="Manage Custom Services" Height="600" Width="800" WindowStartupLocation="CenterScreen">
+    <Grid Margin="10">
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="200"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        
+        <ListBox Name="ServiceList" Grid.Column="0" Grid.Row="0" Margin="0,0,10,10"/>
+        
+        <StackPanel Grid.Column="0" Grid.Row="1" Orientation="Horizontal">
+            <Button Name="NewServiceButton" Content="New Service" Width="90" Height="30" Margin="0,0,10,0"/>
+            <Button Name="DeleteServiceButton" Content="Delete" Width="90" Height="30" Background="Red" Foreground="White"/>
+        </StackPanel>
+        
+        <TextBox Name="ComposeEditor" Grid.Column="1" Grid.Row="0" AcceptsReturn="True" AcceptsTab="True" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Margin="0,0,0,10"/>
+        <Button Name="SaveServiceButton" Grid.Column="1" Grid.Row="1" Content="Save Compose File" Height="30" Background="Green" Foreground="White"/>
+    </Grid>
+</Window>
+"@
+    $manageReader = New-Object System.Xml.XmlNodeReader $manageXaml
+    $manageWindow = [Windows.Markup.XamlReader]::Load($manageReader)
+    
+    $serviceList = $manageWindow.FindName("ServiceList")
+    $newButton = $manageWindow.FindName("NewServiceButton")
+    $deleteButton = $manageWindow.FindName("DeleteServiceButton")
+    $editor = $manageWindow.FindName("ComposeEditor")
+    $saveButton = $manageWindow.FindName("SaveServiceButton")
+    
+    function Load-ServiceList {
+        $serviceList.Items.Clear()
+        Get-ChildItem -Path $servicesDir -Filter "*.yml" | ForEach-Object {
+            [void]$serviceList.Items.Add($_.BaseName)
+        }
+    }
+    
+    Load-ServiceList
+    
+    $serviceList.Add_SelectionChanged({
+        if ($serviceList.SelectedItem) {
+            $path = Join-Path $servicesDir "$($serviceList.SelectedItem).yml"
+            $editor.Text = Get-Content $path -Raw
+        }
+    })
+    
+    $newButton.Add_Click({
+        $newName = [Microsoft.VisualBasic.Interaction]::InputBox("Enter new service name (no spaces):", "New Service")
+        if (-not [string]::IsNullOrWhiteSpace($newName)) {
+            $newName = $newName -replace '\s','_'
+            $path = Join-Path $servicesDir "$newName.yml"
+            "services:`n  ${newName}:`n    image: " | Out-File $path -Encoding UTF8
+            Load-ServiceList
+        }
+    })
+    
+    $saveButton.Add_Click({
+        if ($serviceList.SelectedItem) {
+            $path = Join-Path $servicesDir "$($serviceList.SelectedItem).yml"
+            $editor.Text | Out-File $path -Encoding UTF8
+            [System.Windows.MessageBox]::Show("Compose file saved!", "Success")
+        }
+    })
+    
+    $deleteButton.Add_Click({
+        if ($serviceList.SelectedItem) {
+            $path = Join-Path $servicesDir "$($serviceList.SelectedItem).yml"
+            Remove-Item $path -Force
+            $editor.Text = ""
+            Load-ServiceList
+        }
+    })
+    
+    $manageWindow.ShowDialog() | Out-Null
+}
+
+$manageServicesButton.Add_Click({ Show-ManageServicesWindow })
+
 # Add first server box on startup
 Add-ServerBox
 
@@ -1451,7 +1575,8 @@ $runSetupButton.Add_Click({
             $Config,
             $OutputQueue,
             $ModulesPath,
-            $TerminalMode
+            $TerminalMode,
+            $ServicesDir
         )
         
         # Helper function to queue output messages
@@ -1636,71 +1761,23 @@ $runSetupButton.Add_Click({
             # Deploy the selected service
             Send-Output -Message "[Server $serverNum] Deploying service: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
             
-            $serviceSuccess = $false
-            switch ($Config.Service) {
-                "Portainer" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-Portainer -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] Portainer deployed successfully" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] Portainer deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                "AdGuard" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-AdGuard -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] AdGuard deployed successfully" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] AdGuard deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                "N8N" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-N8N -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] n8n deployed successfully" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] n8n deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                "Heimdall" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-Heimdall -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] Heimdall deployed successfully" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] Heimdall deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                "Crafty" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-Crafty -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] Crafty deployed successfully" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] Crafty deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                default {
-                    Send-Output -Message "[Server $serverNum] Unknown service: $($Config.Service)" -Color "Red" -ServerNum $serverNum
-                }
+            $composePath = Join-Path $ServicesDir "$($Config.Service).yml"
+            if (-not (Test-Path $composePath)) {
+                Send-Output -Message "[Server $serverNum] Error: Config file not found for $($Config.Service)" -Color "Red" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Config missing" }
+            }
+            
+            $composeContent = Get-Content $composePath -Raw
+            
+            Invoke-WithOutput -ScriptBlock {
+                $script:serviceSuccess = Deploy-DockerService -IP $Config.IP -User $Config.User -Password $Config.Password -ServiceName $Config.Service -ComposeContent $composeContent
+            } -ServerNum $serverNum
+            
+            $serviceSuccess = $script:serviceSuccess
+            if ($serviceSuccess) {
+                Send-Output -Message "[Server $serverNum] $($Config.Service) deployed successfully" -Color "Green" -ServerNum $serverNum
+            } else {
+                Send-Output -Message "[Server $serverNum] $($Config.Service) deployment failed" -Color "Red" -ServerNum $serverNum
             }
             
             Send-Output -Message "[Server $serverNum] Deployment complete" -Color "Cyan" -ServerNum $serverNum
@@ -1779,72 +1856,26 @@ $runSetupButton.Add_Click({
                 Send-Output -Message "[Server $serverNum] Warning: Traefik installation failed, services will use direct ports" -Color "Yellow" -ServerNum $serverNum
             }
             
-            # Deploy the selected service in WSL2
-            $serviceSuccess = $false
-            switch ($Config.Service) {
-                "Portainer" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-Portainer -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] Portainer deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] Portainer deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                "AdGuard" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-AdGuard -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] AdGuard deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] AdGuard deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                "N8N" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-N8N -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] n8n deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] n8n deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                "Heimdall" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-Heimdall -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] Heimdall deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] Heimdall deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                "Crafty" {
-                    Invoke-WithOutput -ScriptBlock {
-                        $script:serviceSuccess = Install-Crafty -IP $Config.IP -User $Config.User -Password $Config.Password -Domain "localhost"
-                    } -ServerNum $serverNum
-                    $serviceSuccess = $script:serviceSuccess
-                    if ($serviceSuccess) {
-                        Send-Output -Message "[Server $serverNum] Crafty deployed successfully in WSL2" -Color "Green" -ServerNum $serverNum
-                    }
-                    else {
-                        Send-Output -Message "[Server $serverNum] Crafty deployment failed" -Color "Red" -ServerNum $serverNum
-                    }
-                }
-                default {
-                    Send-Output -Message "[Server $serverNum] Unknown service: $($Config.Service)" -Color "Red" -ServerNum $serverNum
-                }
+            # Deploy the selected service in wsl2
+            Send-Output -Message "[Server $serverNum] Deploying service: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
+            
+            $composePath = Join-Path $ServicesDir "$($Config.Service).yml"
+            if (-not (Test-Path $composePath)) {
+                Send-Output -Message "[Server $serverNum] Error: Config file not found for $($Config.Service)" -Color "Red" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Config missing" }
+            }
+            
+            $composeContent = Get-Content $composePath -Raw
+            
+            Invoke-WithOutput -ScriptBlock {
+                $script:serviceSuccess = Deploy-DockerService -IP $Config.IP -User $Config.User -Password $Config.Password -ServiceName $Config.Service -ComposeContent $composeContent
+            } -ServerNum $serverNum
+            
+            $serviceSuccess = $script:serviceSuccess
+            if ($serviceSuccess) {
+                Send-Output -Message "[Server $serverNum] $($Config.Service) deployed successfully" -Color "Green" -ServerNum $serverNum
+            } else {
+                Send-Output -Message "[Server $serverNum] $($Config.Service) deployment failed" -Color "Red" -ServerNum $serverNum
             }
             
             Send-Output -Message "[Server $serverNum] Deployment complete" -Color "Cyan" -ServerNum $serverNum
@@ -1866,6 +1897,7 @@ $runSetupButton.Add_Click({
         [void]$powershell.AddArgument($global:outputQueue)
         [void]$powershell.AddArgument("$PSScriptRoot\modules")
         [void]$powershell.AddArgument($script:terminalMode)  # Pass terminal mode to runspace
+        [void]$powershell.AddArgument($servicesDir)
         
         $handle = $powershell.BeginInvoke()
         
