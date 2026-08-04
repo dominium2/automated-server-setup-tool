@@ -1441,7 +1441,7 @@ $runSetupButton.Add_Click({
     $runSetupButton.Content = "Deploying..."
     
     # Create a thread-safe collection for output messages
-    $script:outputQueue = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
+    $global:outputQueue = [System.Collections.Concurrent.ConcurrentQueue[hashtable]]::new()
     
     # Create runspace pool for parallel execution
     $runspacePool = [runspacefactory]::CreateRunspacePool(1, [Math]::Max($allServerConfigs.Count, 1))
@@ -1868,7 +1868,7 @@ $runSetupButton.Add_Click({
         
         [void]$powershell.AddScript($serverDeploymentScript)
         [void]$powershell.AddArgument($config)
-        [void]$powershell.AddArgument($script:outputQueue)
+        [void]$powershell.AddArgument($global:outputQueue)
         [void]$powershell.AddArgument("$PSScriptRoot\modules")
         [void]$powershell.AddArgument($script:terminalMode)  # Pass terminal mode to runspace
         
@@ -1882,22 +1882,27 @@ $runSetupButton.Add_Click({
     }
     
     # Create a timer to poll for output messages and check completion
-    $script:deploymentTimer = New-Object System.Windows.Threading.DispatcherTimer
-    $script:deploymentTimer.Interval = [TimeSpan]::FromMilliseconds(100)
-    $script:deploymentRunspaces = $runspaces
-    $script:deploymentRunspacePool = $runspacePool
-    $script:deploymentResults = @()
+    $global:deploymentTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $global:deploymentTimer.Interval = [TimeSpan]::FromMilliseconds(100)
+    $global:deploymentRunspaces = $runspaces
+    $global:deploymentRunspacePool = $runspacePool
+    $global:deploymentResults = @()
     
-    $script:deploymentTimer.Add_Tick({
+    $global:deploymentTimer.Add_Tick({
         # Process any queued output messages
         $outputItem = $null
-        while ($script:outputQueue.TryDequeue([ref]$outputItem)) {
+        while ($global:outputQueue.TryDequeue([ref]$outputItem)) {
             Write-TerminalOutput -Message $outputItem.Message -Color $outputItem.Color
+        }
+        
+        # SECURITY GUARD: Prevent multiple queued timer ticks from executing the completion block
+        if ($null -eq $global:deploymentRunspaces -or $global:deploymentRunspaces.Count -eq 0) {
+            return
         }
         
         # Check if all runspaces are complete
         $allComplete = $true
-        foreach ($rs in $script:deploymentRunspaces) {
+        foreach ($rs in $global:deploymentRunspaces) {
             if (-not $rs.Handle.IsCompleted) {
                 $allComplete = $false
                 break
@@ -1906,14 +1911,19 @@ $runSetupButton.Add_Click({
         
         if ($allComplete) {
             # Stop the timer
-            $script:deploymentTimer.Stop()
+            $global:deploymentTimer.Stop()
+            
+            # LOCK THE RUNSPACES AND CLEAR GLOBAL
+            # This ensures any already-queued ticks in the WPF dispatcher do nothing
+            $runspacesToProcess = $global:deploymentRunspaces
+            $global:deploymentRunspaces = @()
             
             # Collect results
-            foreach ($rs in $script:deploymentRunspaces) {
+            foreach ($rs in $runspacesToProcess) {
                 try {
                     $result = $rs.PowerShell.EndInvoke($rs.Handle)
                     if ($result) {
-                        $script:deploymentResults += $result
+                        $global:deploymentResults += $result
                     }
                 }
                 catch {
@@ -1926,25 +1936,28 @@ $runSetupButton.Add_Click({
             
             # Process any remaining queued messages
             $outputItem = $null
-            while ($script:outputQueue.TryDequeue([ref]$outputItem)) {
+            while ($global:outputQueue.TryDequeue([ref]$outputItem)) {
                 Write-TerminalOutput -Message $outputItem.Message -Color $outputItem.Color
             }
             
             # Clean up runspace pool
-            $script:deploymentRunspacePool.Close()
-            $script:deploymentRunspacePool.Dispose()
+            if ($global:deploymentRunspacePool) {
+                $global:deploymentRunspacePool.Close()
+                $global:deploymentRunspacePool.Dispose()
+                $global:deploymentRunspacePool = $null
+            }
             
             # Summary
             Write-TerminalOutput -Message "" -Color "White"
             Write-TerminalOutput -Message "========== Deployment Summary ==========" -Color "Cyan"
             
-            $successCount = ($script:deploymentResults | Where-Object { $_.Success -eq $true }).Count
-            $failCount = ($script:deploymentResults | Where-Object { $_.Success -eq $false }).Count
+            $successCount = ($global:deploymentResults | Where-Object { $_.Success -eq $true }).Count
+            $failCount = ($global:deploymentResults | Where-Object { $_.Success -eq $false }).Count
             
             Write-TerminalOutput -Message "Successful: $successCount" -Color "Green"
             Write-TerminalOutput -Message "Failed: $failCount" -Color $(if ($failCount -gt 0) { "Red" } else { "Green" })
             
-            foreach ($result in $script:deploymentResults) {
+            foreach ($result in $global:deploymentResults) {
                 if ($result.Success) {
                     Write-TerminalOutput -Message "  [Server $($result.ServerNum)] $($result.IP) - $($result.Service): SUCCESS" -Color "Green"
                 }
@@ -1962,8 +1975,7 @@ $runSetupButton.Add_Click({
         }
     })
     
-    # Start the timer
-    $script:deploymentTimer.Start()
+    $global:deploymentTimer.Start()
 })
 
 #Show the Window

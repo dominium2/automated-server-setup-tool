@@ -14,8 +14,8 @@
 12. ## be able to run setup without traefik
 13. ## Speed up setupprocess
 14. ## Speed up monitoring (8 minutes is unacceptable)
-15. ## Remove putty
-16. ## Remove Choco
+15. ## Remove putty(needed to function)
+16. ## Remove Choco(done)
 17. ## Fix the testing
 18. ## Document code thurougly
 19. ## Fix WSL2 install
