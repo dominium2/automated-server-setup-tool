@@ -11,9 +11,9 @@
 9. ## fix this broken project
 10. ## be able to let the user add their own services(done)
 11. ## be able to start, stop, restart the containers
-12. ## be able to run setup without traefik
+12. ## be able to run setup without traefik(done)
 13. ## Speed up setupprocess
-14. ## Speed up monitoring (8 minutes is unacceptable)
+14. ## Speed up monitoring
 15. ## Remove putty(needed to function)
 16. ## Remove Choco(done)
 17. ## Fix the testing

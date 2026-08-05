@@ -844,6 +844,7 @@ function Test-CommonServices {
 
 # UNIVERSAL HELPER: Replaces hundreds of lines of duplicate code in service installation functions.
 # UNIVERSAL HELPER: Replaces hundreds of lines of duplicate code in service installation functions.
+# UNIVERSAL HELPER: Replaces hundreds of lines of duplicate code in service installation functions.
 function Deploy-DockerService {
     param (
         [string]$IP,
@@ -854,9 +855,6 @@ function Deploy-DockerService {
     )
     
     Write-Host "`nStarting $ServiceName deployment on $IP..." -ForegroundColor Cyan
-    
-    # Standardize container name to lowercase for Docker filters
-    $containerNameLower = $ServiceName.ToLower()
     
     # 0. SMART FIX: Free up Port 53 from systemd-resolved if the config requires it
     if ($ComposeContent -match '53:53') {
@@ -888,37 +886,34 @@ function Deploy-DockerService {
     # Append || true to prevent script halt if a sub-folder already exists
     Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "$dirCommand 2>/dev/null || true" | Out-Null
     
-    # 2. Check and cleanup existing containers
-    $checkContainer = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker ps -a --filter name=$containerNameLower --format '{{.Names}}' 2>/dev/null"
-    if ($checkContainer -match $containerNameLower) {
-        Write-Host "Removing existing $ServiceName container..." -ForegroundColor Yellow
-        $composeExists = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "test -f /home/$User/$ServiceName/docker-compose.yml && echo 'exists'"
-        if ($composeExists -match "exists") {
-            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose down" | Out-Null
-        } else {
-            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker rm -f $containerNameLower" | Out-Null
-        }
+    # 2. Check and cleanup existing compose stack dynamically
+    $composeExists = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "test -f /home/$User/$ServiceName/docker-compose.yml && echo 'exists'"
+    if ($composeExists -match "exists") {
+        Write-Host "Removing existing $ServiceName stack..." -ForegroundColor Yellow
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose down 2>/dev/null" | Out-Null
     }
     
     # 3. Transfer Compose file
     $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($ComposeContent))
     Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "echo '$composeBase64' | base64 -d > /home/$User/$ServiceName/docker-compose.yml" | Out-Null
     
-    # 4. Verify Traefik network
-    $networkCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network ls --filter name=traefik-network --format '{{.Name}}' 2>/dev/null"
-    if (-not ($networkCheck -match "traefik-network")) {
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network create traefik-network 2>&1 || true" | Out-Null
+    # 4. Verify Traefik network (only if the compose file actually needs it)
+    if ($ComposeContent -match 'traefik-network') {
+        $networkCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network ls --filter name=traefik-network --format '{{.Name}}' 2>/dev/null"
+        if (-not ($networkCheck -match "traefik-network")) {
+            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network create traefik-network 2>&1 || true" | Out-Null
+        }
     }
     
     # 5. Deploy container (Capture output for debugging)
     Write-Host "Deploying $ServiceName with Docker Compose..." -ForegroundColor Cyan
     $deployResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose up -d 2>&1"
     
-    # 6. Verify status
+    # 6. Verify status dynamically by checking the compose stack directly
     Start-Sleep -Seconds 5
-    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker ps --filter name=$containerNameLower --format '{{.Status}}'"
+    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose ps"
     
-    if ($verifyResult -match "Up") {
+    if ($verifyResult -match "Up|running") {
         Write-Host "$ServiceName installed successfully!" -ForegroundColor Green
         return $true
     } else {

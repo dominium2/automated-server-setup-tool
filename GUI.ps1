@@ -37,7 +37,22 @@ networks:
     external: true
 "@
     $defaultPortainer | Out-File (Join-Path $servicesDir "Portainer.yml") -Encoding UTF8
-    # You can add the other defaults here, or manually create them using the new GUI manager
+    
+    #Default config for Portainer without Traefik
+    $defaultPortainerNoTraefik = @"
+services:
+  portainer:
+    container_name: portainer
+    image: portainer/portainer-ce:lts
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+"@
+    $defaultPortainerNoTraefik | Out-File (Join-Path $servicesDir "Portainer-NoTraefik.yml") -Encoding UTF8
 }
 # ---------------------------------------
 
@@ -168,7 +183,7 @@ function Add-ServerBox {
     $grid = New-Object System.Windows.Controls.Grid
     
     # Add row definitions
-    0..3 | ForEach-Object {
+    0..4 | ForEach-Object {
         $rowDef = New-Object System.Windows.Controls.RowDefinition
         $rowDef.Height = "Auto"
         [void]$grid.RowDefinitions.Add($rowDef)
@@ -234,30 +249,48 @@ function Add-ServerBox {
     [void]$grid.Children.Add($passwordBox)
     
     # Service Field
-        $serviceLabel = New-Object System.Windows.Controls.Label
-        $serviceLabel.Content = "Service:"
-        $serviceLabel.VerticalAlignment = "Center"
-        $serviceLabel.Margin = "0,5"
-        [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3)
-        [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0)
-        [void]$grid.Children.Add($serviceLabel)
-        
-        $serviceComboBox = New-Object System.Windows.Controls.ComboBox
-        $serviceComboBox.Height = 25
-        $serviceComboBox.Margin = "0,5"
-        $serviceComboBox.Name = "ServiceField$($script:serverCount)"
-        
-        # --- NEW: LOAD DYNAMIC SERVICES ---
-        $serviceFiles = Get-ChildItem -Path $servicesDir -Filter "*.yml"
-        foreach ($file in $serviceFiles) {
-            $item = New-Object System.Windows.Controls.ComboBoxItem
-            $item.Content = $file.BaseName
-            [void]$serviceComboBox.Items.Add($item)
-        }
-        
-        [System.Windows.Controls.Grid]::SetRow($serviceComboBox, 3)
-        [System.Windows.Controls.Grid]::SetColumn($serviceComboBox, 1)
-        [void]$grid.Children.Add($serviceComboBox)
+    $serviceLabel = New-Object System.Windows.Controls.Label
+    $serviceLabel.Content = "Service:"
+    $serviceLabel.VerticalAlignment = "Center"
+    $serviceLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3)
+    [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0)
+    [void]$grid.Children.Add($serviceLabel)
+    
+    $serviceComboBox = New-Object System.Windows.Controls.ComboBox
+    $serviceComboBox.Height = 25
+    $serviceComboBox.Margin = "0,5"
+    $serviceComboBox.Name = "ServiceField$($script:serverCount)"
+    
+    # Load all dynamic services
+    $serviceFiles = Get-ChildItem -Path $servicesDir -Filter "*.yml"
+    foreach ($file in $serviceFiles) {
+        $item = New-Object System.Windows.Controls.ComboBoxItem
+        $item.Content = $file.BaseName
+        [void]$serviceComboBox.Items.Add($item)
+    }
+    
+    [System.Windows.Controls.Grid]::SetRow($serviceComboBox, 3)
+    [System.Windows.Controls.Grid]::SetColumn($serviceComboBox, 1)
+    [void]$grid.Children.Add($serviceComboBox)
+
+    # Use Traefik Field
+    $traefikLabel = New-Object System.Windows.Controls.Label
+    $traefikLabel.Content = "Use Traefik:"
+    $traefikLabel.VerticalAlignment = "Center"
+    $traefikLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($traefikLabel, 4)
+    [System.Windows.Controls.Grid]::SetColumn($traefikLabel, 0)
+    [void]$grid.Children.Add($traefikLabel)
+    
+    $traefikCheckBox = New-Object System.Windows.Controls.CheckBox
+    $traefikCheckBox.IsChecked = $true
+    $traefikCheckBox.VerticalAlignment = "Center"
+    $traefikCheckBox.Margin = "0,5"
+    $traefikCheckBox.Name = "UseTraefikField$($script:serverCount)"
+    [System.Windows.Controls.Grid]::SetRow($traefikCheckBox, 4)
+    [System.Windows.Controls.Grid]::SetColumn($traefikCheckBox, 1)
+    [void]$grid.Children.Add($traefikCheckBox)
     
     # Add grid to GroupBox
     $groupBox.Content = $grid
@@ -272,6 +305,7 @@ function Add-ServerBox {
         UserTextBox = $userTextBox
         PasswordBox = $passwordBox
         ServiceComboBox = $serviceComboBox
+        UseTraefikCheckBox = $traefikCheckBox
     }
     $script:serverControls += $serverControlRefs
 }
@@ -295,6 +329,7 @@ function Get-AllServerConfigs {
             User = $controls.UserTextBox.Text
             Password = $controls.PasswordBox.Password
             Service = $selectedService
+            UseTraefik = [bool]$controls.UseTraefikCheckBox.IsChecked
         }
         
         $allConfigs += $config
@@ -1727,43 +1762,35 @@ $runSetupButton.Add_Click({
         
         # Deploy service based on OS
         if ($osType -eq "Linux") {
-            Send-Output -Message "[Server $serverNum] Deploying on Linux system..." -Color "Yellow" -ServerNum $serverNum
-            
-            # Install Docker first (required for all services)
-            Send-Output -Message "[Server $serverNum] Ensuring Docker is installed..." -Color "Cyan" -ServerNum $serverNum
-            $dockerInstalled = $null
-            Invoke-WithOutput -ScriptBlock {
-                $script:dockerInstalled = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password
-            } -ServerNum $serverNum
-            $dockerInstalled = $script:dockerInstalled
-            
-            if (-not $dockerInstalled) {
-                Send-Output -Message "[Server $serverNum] Failed to install Docker. Skipping service deployment." -Color "Red" -ServerNum $serverNum
-                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
-            }
             Send-Output -Message "[Server $serverNum] Docker is ready" -Color "Green" -ServerNum $serverNum
             
             # Install Traefik
-            Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy..." -Color "Cyan" -ServerNum $serverNum
-            $traefikSuccess = $null
-            Invoke-WithOutput -ScriptBlock {
-                $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
-            } -ServerNum $serverNum
-            $traefikSuccess = $script:traefikSuccess
-            
-            if ($traefikSuccess) {
-                Send-Output -Message "[Server $serverNum] Traefik installed successfully" -Color "Green" -ServerNum $serverNum
-            }
-            else {
-                Send-Output -Message "[Server $serverNum] Warning: Traefik installation failed, services will use direct ports" -Color "Yellow" -ServerNum $serverNum
+            if ($Config.UseTraefik) {
+                Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy..." -Color "Cyan" -ServerNum $serverNum
+                $traefikSuccess = $null
+                Invoke-WithOutput -ScriptBlock {
+                    $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+                } -ServerNum $serverNum
+                $traefikSuccess = $script:traefikSuccess
+                
+                if ($traefikSuccess) {
+                    Send-Output -Message "[Server $serverNum] Traefik installed successfully" -Color "Green" -ServerNum $serverNum
+                }
+                else {
+                    Send-Output -Message "[Server $serverNum] Warning: Traefik installation failed, services will use direct ports" -Color "Yellow" -ServerNum $serverNum
+                }
+            } else {
+                Send-Output -Message "[Server $serverNum] Traefik installation skipped (Disabled in config)" -Color "Gray" -ServerNum $serverNum
             }
             
             # Deploy the selected service
             Send-Output -Message "[Server $serverNum] Deploying service: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
             
-            $composePath = Join-Path $ServicesDir "$($Config.Service).yml"
+            $composeFileName = "$($Config.Service).yml"
+            $composePath = Join-Path $ServicesDir $composeFileName
+            
             if (-not (Test-Path $composePath)) {
-                Send-Output -Message "[Server $serverNum] Error: Config file not found for $($Config.Service)" -Color "Red" -ServerNum $serverNum
+                Send-Output -Message "[Server $serverNum] Error: Config file not found ($composeFileName)" -Color "Red" -ServerNum $serverNum
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Config missing" }
             }
             
@@ -1784,84 +1811,34 @@ $runSetupButton.Add_Click({
             return @{ Success = $serviceSuccess; ServerNum = $serverNum; IP = $Config.IP; Service = $Config.Service }
         }
         elseif ($osType -eq "Windows") {
-            Send-Output -Message "[Server $serverNum] Deploying on Windows system..." -Color "Yellow" -ServerNum $serverNum
-            
-            # Step 1: Install WSL2 first (with automatic reboot if needed)
-            Send-Output -Message "[Server $serverNum] Step 1: Installing WSL2 (required for containerized services)..." -Color "Cyan" -ServerNum $serverNum
-            Invoke-WithOutput -ScriptBlock {
-                $script:wsl2Result = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -Distribution "Ubuntu" -AutoReboot -WaitForReboot
-            } -ServerNum $serverNum
-            $wsl2Result = $script:wsl2Result
-            
-            # Handle the new return format (hashtable with Success, NeedsReboot, Ready properties)
-            $wsl2Success = $false
-            $wsl2NeedsReboot = $false
-            $wsl2Ready = $false
-            
-            if ($wsl2Result -is [hashtable]) {
-                $wsl2Success = $wsl2Result.Success
-                $wsl2NeedsReboot = $wsl2Result.NeedsReboot
-                $wsl2Ready = $wsl2Result.Ready
-            }
-            elseif ($wsl2Result -is [bool]) {
-                # Backward compatibility
-                $wsl2Success = $wsl2Result
-                $wsl2Ready = $wsl2Result
-            }
-            
-            if (-not $wsl2Success) {
-                Send-Output -Message "[Server $serverNum] WSL2 installation failed. Cannot proceed with service deployment." -Color "Red" -ServerNum $serverNum
-                Send-Output -Message "[Server $serverNum] Please ensure WSL2 prerequisites are met and try again." -Color "Yellow" -ServerNum $serverNum
-                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "WSL2 installation failed" }
-            }
-            
-            # Check if reboot is still required
-            if ($wsl2NeedsReboot -and -not $wsl2Ready) {
-                Send-Output -Message "[Server $serverNum] SYSTEM REBOOT STILL REQUIRED" -Color "Yellow" -ServerNum $serverNum
-                Send-Output -Message "[Server $serverNum] Automatic reboot may have failed. Please reboot manually." -Color "Yellow" -ServerNum $serverNum
-                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Reboot required" }
-            }
-            
-            Send-Output -Message "[Server $serverNum] WSL2 is ready" -Color "Green" -ServerNum $serverNum
-            
-            # Step 2: Deploy the selected service inside WSL2
-            Send-Output -Message "[Server $serverNum] Step 2: Deploying service inside WSL2: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
-            Send-Output -Message "[Server $serverNum] Connecting to WSL2 instance..." -Color "Cyan" -ServerNum $serverNum
-            
-            # Install Docker in WSL2 (required for all services)
-            Send-Output -Message "[Server $serverNum] Ensuring Docker is installed in WSL2..." -Color "Cyan" -ServerNum $serverNum
-            Invoke-WithOutput -ScriptBlock {
-                $script:dockerInstalled = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password
-            } -ServerNum $serverNum
-            $dockerInstalled = $script:dockerInstalled
-            
-            if (-not $dockerInstalled) {
-                Send-Output -Message "[Server $serverNum] Failed to install Docker in WSL2. Skipping service deployment." -Color "Red" -ServerNum $serverNum
-                Send-Output -Message "[Server $serverNum] This may indicate WSL2 is not fully ready." -Color "Yellow" -ServerNum $serverNum
-                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker in WSL2 failed" }
-            }
             Send-Output -Message "[Server $serverNum] Docker is ready in WSL2" -Color "Green" -ServerNum $serverNum
             
             # Install Traefik
-            Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy in WSL2..." -Color "Cyan" -ServerNum $serverNum
-            Invoke-WithOutput -ScriptBlock {
-                $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
-            } -ServerNum $serverNum
-            $traefikSuccess = $script:traefikSuccess
-            
-            if ($traefikSuccess) {
-                Send-Output -Message "[Server $serverNum] Traefik installed successfully in WSL2" -Color "Green" -ServerNum $serverNum
-            }
-            else {
-                Send-Output -Message "[Server $serverNum] Warning: Traefik installation failed, services will use direct ports" -Color "Yellow" -ServerNum $serverNum
+            if ($Config.UseTraefik) {
+                Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy in WSL2..." -Color "Cyan" -ServerNum $serverNum
+                Invoke-WithOutput -ScriptBlock {
+                    $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+                } -ServerNum $serverNum
+                $traefikSuccess = $script:traefikSuccess
+                
+                if ($traefikSuccess) {
+                    Send-Output -Message "[Server $serverNum] Traefik installed successfully in WSL2" -Color "Green" -ServerNum $serverNum
+                }
+                else {
+                    Send-Output -Message "[Server $serverNum] Warning: Traefik installation failed, services will use direct ports" -Color "Yellow" -ServerNum $serverNum
+                }
+            } else {
+                Send-Output -Message "[Server $serverNum] Traefik installation skipped (Disabled in config)" -Color "Gray" -ServerNum $serverNum
             }
             
             # Deploy the selected service in wsl2
             Send-Output -Message "[Server $serverNum] Deploying service: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
             
-            $composePath = Join-Path $ServicesDir "$($Config.Service).yml"
+            $composeFileName = "$($Config.Service).yml"
+            $composePath = Join-Path $ServicesDir $composeFileName
+            
             if (-not (Test-Path $composePath)) {
-                Send-Output -Message "[Server $serverNum] Error: Config file not found for $($Config.Service)" -Color "Red" -ServerNum $serverNum
+                Send-Output -Message "[Server $serverNum] Error: Config file not found ($composeFileName)" -Color "Red" -ServerNum $serverNum
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Config missing" }
             }
             
