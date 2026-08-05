@@ -322,8 +322,8 @@ function Get-AllServerConfigs {
             $null
         }
         
-        # Create configuration hashtable
-        $config = @{
+        # Create configuration object (Cast to PSCustomObject)
+        $config = [PSCustomObject]@{
             ServerNumber = $controls.ServerNumber
             IP = $controls.IPTextBox.Text
             User = $controls.UserTextBox.Text
@@ -335,7 +335,8 @@ function Get-AllServerConfigs {
         $allConfigs += $config
     }
     
-    return $allConfigs
+    # The unary comma prevents PowerShell from unrolling a single-item array
+    return ,$allConfigs
 }
 
 # Function to validate IP address format
@@ -695,7 +696,7 @@ function Show-HealthMonitorWindow {
     
     # Function to create a container health card
     function New-ContainerHealthCard {
-        param($ServerIP, $ContainerData)
+        param($ServerConfig, $ContainerData)
         
         $border = New-Object System.Windows.Controls.Border
         $border.BorderBrush = [System.Windows.Media.Brushes]::Gray
@@ -719,7 +720,7 @@ function Show-HealthMonitorWindow {
         
         # Header
         $headerText = New-Object System.Windows.Controls.TextBlock
-        $headerText.Text = "Server: $ServerIP - Containers ($($ContainerData.RunningContainers)/$($ContainerData.TotalContainers) running)"
+        $headerText.Text = "Server: $($ServerConfig.IP) - Containers ($($ContainerData.RunningContainers)/$($ContainerData.TotalContainers) running)"
         $headerText.FontWeight = "Bold"
         $headerText.FontSize = 14
         $headerText.Margin = New-Object System.Windows.Thickness(0,0,0,10)
@@ -741,9 +742,13 @@ function Show-HealthMonitorWindow {
                 $col2.Width = "*"
                 $col3 = New-Object System.Windows.Controls.ColumnDefinition
                 $col3.Width = "100"
+                $col4 = New-Object System.Windows.Controls.ColumnDefinition
+                $col4.Width = "110"
+                
                 [void]$containerGrid.ColumnDefinitions.Add($col1)
                 [void]$containerGrid.ColumnDefinitions.Add($col2)
                 [void]$containerGrid.ColumnDefinitions.Add($col3)
+                [void]$containerGrid.ColumnDefinitions.Add($col4)
                 
                 # Container name with state icon
                 $namePanel = New-Object System.Windows.Controls.StackPanel
@@ -793,8 +798,76 @@ function Show-HealthMonitorWindow {
                 $imageText.Foreground = [System.Windows.Media.Brushes]::Gray
                 $imageText.FontSize = 10
                 $imageText.TextTrimming = "CharacterEllipsis"
+                $imageText.VerticalAlignment = "Center"
                 [System.Windows.Controls.Grid]::SetColumn($imageText, 2)
                 [void]$containerGrid.Children.Add($imageText)
+                
+                # --- Action Buttons ---
+                $actionPanel = New-Object System.Windows.Controls.StackPanel
+                $actionPanel.Orientation = "Horizontal"
+                $actionPanel.HorizontalAlignment = "Right"
+                [System.Windows.Controls.Grid]::SetColumn($actionPanel, 3)
+                
+                $tagData = @{ Config = $ServerConfig; ContainerName = $container.Name }
+
+                $btnStart = New-Object System.Windows.Controls.Button
+                $btnStart.Content = "▶"
+                $btnStart.ToolTip = "Start Container"
+                $btnStart.Width = 30
+                $btnStart.Height = 22
+                $btnStart.Margin = New-Object System.Windows.Thickness(2)
+                $btnStart.IsEnabled = ($container.State -ne "running")
+                $btnStart.Tag = $tagData
+                $btnStart.Add_Click({
+                    $data = $this.Tag
+                    $statusBarText.Text = "Starting $($data.ContainerName) on $($data.Config.IP)..."
+                    $this.Dispatcher.Invoke([action]{}, "Background") # Force UI refresh
+                    
+                    $res = Start-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
+                    if ($res) { $statusBarText.Text = "Started $($data.ContainerName)." } else { $statusBarText.Text = "Failed to start $($data.ContainerName)." }
+                    Refresh-HealthData
+                })
+
+                $btnStop = New-Object System.Windows.Controls.Button
+                $btnStop.Content = "■"
+                $btnStop.ToolTip = "Stop Container"
+                $btnStop.Width = 30
+                $btnStop.Height = 22
+                $btnStop.Margin = New-Object System.Windows.Thickness(2)
+                $btnStop.IsEnabled = ($container.State -eq "running")
+                $btnStop.Tag = $tagData
+                $btnStop.Add_Click({
+                    $data = $this.Tag
+                    $statusBarText.Text = "Stopping $($data.ContainerName) on $($data.Config.IP)..."
+                    $this.Dispatcher.Invoke([action]{}, "Background")
+                    
+                    $res = Stop-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
+                    if ($res) { $statusBarText.Text = "Stopped $($data.ContainerName)." } else { $statusBarText.Text = "Failed to stop $($data.ContainerName)." }
+                    Refresh-HealthData
+                })
+
+                $btnRestart = New-Object System.Windows.Controls.Button
+                $btnRestart.Content = "↻"
+                $btnRestart.ToolTip = "Restart Container"
+                $btnRestart.Width = 30
+                $btnRestart.Height = 22
+                $btnRestart.Margin = New-Object System.Windows.Thickness(2)
+                $btnRestart.Tag = $tagData
+                $btnRestart.Add_Click({
+                    $data = $this.Tag
+                    $statusBarText.Text = "Restarting $($data.ContainerName) on $($data.Config.IP)..."
+                    $this.Dispatcher.Invoke([action]{}, "Background")
+                    
+                    $res = Restart-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
+                    if ($res) { $statusBarText.Text = "Restarted $($data.ContainerName)." } else { $statusBarText.Text = "Failed to restart $($data.ContainerName)." }
+                    Refresh-HealthData
+                })
+
+                [void]$actionPanel.Children.Add($btnStart)
+                [void]$actionPanel.Children.Add($btnStop)
+                [void]$actionPanel.Children.Add($btnRestart)
+                [void]$containerGrid.Children.Add($actionPanel)
+                # ---------------------------
                 
                 $containerBorder.Child = $containerGrid
                 [void]$mainStack.Children.Add($containerBorder)
@@ -861,15 +934,17 @@ function Show-HealthMonitorWindow {
         $healthCheckScript = {
             param($Config, $OutputQueue, $ModulesPath)
             
-            # Use consolidated RMSetup module instead of deprecated individual modules
             Import-Module "$ModulesPath\RMSetup.psm1" -Force -ErrorAction SilentlyContinue
             
             $serverHealth = $null
             $containerHealth = $null
             
+            # Detect target OS once and pass it down to eliminate redundant TCP port probing
+            $osType = Get-TargetOS -IP $Config.IP
+            
             try {
-                # Get server health
-                $serverHealth = Get-ServerHealth -IP $Config.IP -User $Config.User -Password $Config.Password
+                # Get server health with cached OS
+                $serverHealth = Get-ServerHealth -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
             }
             catch {
                 $serverHealth = [PSCustomObject]@{
@@ -882,8 +957,8 @@ function Show-HealthMonitorWindow {
             }
             
             try {
-                # Get container health
-                $containerHealth = Get-ContainerHealth -IP $Config.IP -User $Config.User -Password $Config.Password
+                # Get container health with cached OS
+                $containerHealth = Get-ContainerHealth -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
             }
             catch {
                 $containerHealth = [PSCustomObject]@{
@@ -1037,7 +1112,7 @@ function Show-HealthMonitorWindow {
                     }
                     
                     # Create container health card
-                    $containerCard = New-ContainerHealthCard -ServerIP $result.Config.IP -ContainerData $result.ContainerHealth
+                    $containerCard = New-ContainerHealthCard -ServerConfig $result.Config -ContainerData $result.ContainerHealth
                     [void]$containerHealthPanel.Children.Add($containerCard)
                 }
                 

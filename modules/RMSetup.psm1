@@ -489,25 +489,21 @@ function Invoke-RemoteCommand {
         [string]$Password,
         
         [Parameter(Mandatory=$true)]
-        [string]$Command
+        [string]$Command,
+
+        [string]$OSType = $null
     )
     
     try {
-        Write-LogDebug -Message "Executing remote command on $IP" -Component "RemoteCommand"
-        
-        # Detect the OS
-        $osType = Get-TargetOS -IP $IP
+        # Use provided OSType to prevent re-running TCP port checks on every call
+        $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
         
         if ($osType -eq "Linux") {
-            Write-LogDebug -Message "Using SSH for command execution on $IP" -Component "RemoteCommand"
-            
             # EXPLANATION FOR PLINK:
             # Native Windows OpenSSH (ssh.exe) does not allow passing passwords via script parameters.
             # plink is required here to automate the password injection using '-pw' and '-batch'.
             if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
                 Write-LogError -Message "plink not found - required for SSH command execution" -Component "RemoteCommand"
-                Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
-                Write-Host "Install with: choco install putty -y" -ForegroundColor Yellow
                 return $null
             }
             
@@ -517,46 +513,19 @@ function Invoke-RemoteCommand {
                 Write-LogError -Message "SSH command failed on ${IP}: $result" -Component "RemoteCommand"
                 return $null
             }
-            
-            Write-LogDebug -Message "SSH command completed successfully on $IP" -Component "RemoteCommand"
             return $result
         }
         elseif ($osType -eq "Windows") {
-            Write-LogDebug -Message "Using WSL2 for command execution on $IP" -Component "RemoteCommand"
-            # Use WSL2 for Windows systems
             $wslResult = Invoke-WSLCommand -IP $IP -User $User -Password $Password -Command $Command
-            
-            if ($null -eq $wslResult) {
-                Write-LogError -Message "WSL command execution failed on $IP" -Component "RemoteCommand"
-                Write-Host "WSL command execution failed" -ForegroundColor Red
-                return $null
-            }
-            
-            # Check for distribution errors
-            if ($wslResult.ExitCode -ne 0 -and $wslResult.Output -match "no distribution|not found") {
-                Write-LogError -Message "WSL distribution error on ${IP}: $($wslResult.Output)" -Component "RemoteCommand"
-                Write-Host "Error: $($wslResult.Output)" -ForegroundColor Red
-                return $null
-            }
-            
-            if ($wslResult.ExitCode -ne 0 -and $wslResult.Output -match "error|fatal|failed|denied|cannot|permission denied") {
-                Write-LogWarning -Message "WSL command error on ${IP}: $($wslResult.Output)" -Component "RemoteCommand"
-                Write-Host "Command error: $($wslResult.Output)" -ForegroundColor Yellow
-                return $null
-            }
-            
-            Write-LogDebug -Message "WSL command completed successfully on $IP" -Component "RemoteCommand"
+            if ($null -eq $wslResult) { return $null }
             return $wslResult.Output
         }
         else {
-            Write-LogError -Message "Unable to detect OS type for $IP" -Component "RemoteCommand"
-            Write-Host "Unable to detect OS type for $IP" -ForegroundColor Red
             return $null
         }
     }
     catch {
         Write-LogError -Message "Error executing remote command on $IP" -Component "RemoteCommand" -Exception $_.Exception
-        Write-Host "Error executing remote command: $($_.Exception.Message)" -ForegroundColor Red
         return $null
     }
 }
@@ -567,14 +536,15 @@ function Invoke-RemoteCommand {
 #===============================================================================
 
 function Get-ServerHealth {
-    param([string]$IP, [string]$User, [string]$Password)
+    param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
     try {
-        $pingResult = Test-Connection -ComputerName $IP -Count 2 -Quiet -ErrorAction SilentlyContinue
+        $pingResult = Test-Connection -ComputerName $IP -Count 1 -Quiet -ErrorAction SilentlyContinue
         if (-not $pingResult) {
             return [PSCustomObject]@{ IP = $IP; Status = "Offline"; StatusColor = "Red"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = "Server not reachable" }
         }
-        $osType = Get-TargetOS -IP $IP
-        if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password $Password }
+        
+        $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+        if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password $Password -OSType $osType }
         elseif ($osType -eq "Windows") { return Get-WindowsServerHealth -IP $IP -User $User -Password $Password }
         else { return [PSCustomObject]@{ IP = $IP; Status = "Unknown"; StatusColor = "Yellow"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = "Could not detect OS type" } }
     }
@@ -582,7 +552,7 @@ function Get-ServerHealth {
 }
 
 function Get-LinuxServerHealth {
-    param([string]$IP, [string]$User, [string]$Password)
+    param([string]$IP, [string]$User, [string]$Password, [string]$OSType = "Linux")
     try {
         $healthCommand = @"
 echo '===CPU===' && top -bn1 | grep 'Cpu(s)' | awk '{print 100 - `$8}' && \
@@ -591,7 +561,7 @@ echo '===DISK===' && df -h / | awk 'NR==2{print `$5}' | tr -d '%' && \
 echo '===UPTIME===' && uptime -p && \
 echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
 "@
-        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $healthCommand
+        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $healthCommand -OSType $OSType
         if ($null -eq $result) { throw "Failed to retrieve health metrics" }
         
         $resultLines = $result -split "`n"
@@ -615,7 +585,6 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
                 }
                 "MEMORY" { 
                     $memParts = $line -split '\s+'
-                    # SECURITY GUARD: Ensure the parsed strings are actually numbers before casting
                     if ($memParts.Count -ge 3 -and $memParts[0] -match '^\d+\.?\d*$' -and $memParts[1] -match '^\d+\.?\d*$') { 
                         $memoryUsed = [double]$memParts[0]
                         $memoryTotal = [double]$memParts[1]
@@ -636,19 +605,14 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
                 }
                 "LOAD" { 
                     $loadParts = $line -split '\s+'
-                    # Check if the load outputs are actually numbers (load format is like 0.01 0.05 0.00)
                     if ($loadParts.Count -ge 3 -and $loadParts[0] -match '^\d+\.?\d*$') { 
-                        $load1 = $loadParts[0]
-                        $load5 = $loadParts[1]
-                        $load15 = $loadParts[2] 
+                        $load1 = $loadParts[0]; $load5 = $loadParts[1]; $load15 = $loadParts[2] 
                     } 
                 }
             }
         }
         
         $status = "Healthy"; $statusColor = "Green"
-        
-        # Determine status, treating missing data ($null) safely
         if (($cpuUsage -ne $null -and $cpuUsage -gt 90) -or ($memoryPercent -ne $null -and $memoryPercent -gt 90) -or ($diskPercent -ne $null -and $diskPercent -gt 90)) { 
             $status = "Critical"; $statusColor = "Red" 
         }
@@ -656,7 +620,6 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
             $status = "Warning"; $statusColor = "Yellow" 
         }
         elseif ($cpuUsage -eq $null -and $memoryPercent -eq $null) {
-            # If we couldn't parse the metrics, degrade the status gracefully instead of crashing
             $status = "Degraded"; $statusColor = "Yellow"
         }
         
@@ -703,59 +666,104 @@ function Get-WindowsServerHealth {
 }
 
 function Get-ContainerHealth {
-    param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName = $null)
+    param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName = $null, [string]$OSType = $null)
     try {
-        $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker info --format '{{.ServerVersion}}' 2>/dev/null || echo 'DOCKER_NOT_RUNNING'"
-        if ($null -eq $dockerCheck -or $dockerCheck -match "DOCKER_NOT_RUNNING|Cannot connect|permission denied") {
-            return @([PSCustomObject]@{ ServerIP = $IP; Status = "DockerNotAccessible"; StatusColor = "Red"; ErrorMessage = "Docker not accessible"; Containers = @() })
+        $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+
+        # Single batch command: fetches container listing, inspect data, and stats in ONE SSH roundtrip
+        $batchCommand = 'docker ps -a --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.State}}" 2>/dev/null && echo "===INSPECT===" && (docker inspect --format "{{.ID}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}|{{.RestartCount}}" $(docker ps -aq 2>/dev/null) 2>/dev/null || true) && echo "===STATS===" && (docker stats --no-stream --format "{{.ID}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}" 2>/dev/null || true)'
+
+        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCommand -OSType $osType
+        
+        # THE FIX: Plink and WSL return arrays of lines. Join them into a single multiline string 
+        # so the section markers split the massive block of text properly!
+        $result = $result -join "`n"
+        
+        if ($null -eq $result -or [string]::IsNullOrWhiteSpace($result)) {
+            return [PSCustomObject]@{ ServerIP = $IP; Status = "DockerNotAccessible"; StatusColor = "Red"; ErrorMessage = "Docker not accessible"; Containers = @() }
         }
+
+        # Parse sections
+        $sections = $result -split "===INSPECT==="
+        $psOutput = $sections[0]
         
-        $containerFilter = if (-not [string]::IsNullOrEmpty($ContainerName)) { "--filter `"name=$ContainerName`"" } else { "" }
-        $containerCommand = "docker ps -a $containerFilter --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.State}}' 2>/dev/null"
-        $containerList = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $containerCommand
-        
-        if ($null -eq $containerList -or [string]::IsNullOrWhiteSpace($containerList)) {
-            return @([PSCustomObject]@{ ServerIP = $IP; Status = "NoContainers"; StatusColor = "Gray"; ErrorMessage = $null; Containers = @() })
+        $inspectOutput = ""
+        $statsOutput = ""
+        if ($sections.Count -gt 1) {
+            $subSections = $sections[1] -split "===STATS==="
+            $inspectOutput = $subSections[0]
+            if ($subSections.Count -gt 1) { $statsOutput = $subSections[1] }
         }
-        
+
+        # Index inspection data by short container ID
+        $inspectMap = @{}
+        foreach ($line in ($inspectOutput -split "`n")) {
+            $p = $line.Trim() -split '\|'
+            if ($p.Count -ge 3) {
+                $shortId = $p[0].Trim().Substring(0, [Math]::Min(12, $p[0].Trim().Length))
+                $inspectMap[$shortId] = @{ Health = $p[1].Trim(); Restarts = [int]($p[2].Trim() -as [int]) }
+            }
+        }
+
+        # Index stats data by short container ID
+        $statsMap = @{}
+        foreach ($line in ($statsOutput -split "`n")) {
+            $p = $line.Trim() -split '\|'
+            if ($p.Count -ge 4) {
+                $shortId = $p[0].Trim().Substring(0, [Math]::Min(12, $p[0].Trim().Length))
+                $statsMap[$shortId] = @{ CPU = $p[1].Trim() -replace '%', ''; MemUsage = $p[2].Trim(); MemPerc = $p[3].Trim() -replace '%', '' }
+            }
+        }
+
         $containers = @()
-        $containerLines = $containerList -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-        
+        $containerLines = $psOutput -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
         foreach ($line in $containerLines) {
             $parts = $line -split '\|'
             if ($parts.Count -lt 6) { continue }
-            
-            $state = $parts[5].Trim()
-            $cpuPercent = $null; $memUsage = $null; $memPercent = $null; $netIO = $null; $blockIO = $null; $restartCount = 0; $healthStatus = "N/A"
-            
-            if ($state -eq "running") {
-                $statsCommand = "docker stats $($parts[0].Trim()) --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}' 2>/dev/null"
-                $stats = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $statsCommand
-                if ($stats) {
-                    $statsParts = $stats.Trim() -split '\|'
-                    if ($statsParts.Count -ge 5) { $cpuPercent = $statsParts[0].Trim() -replace '%', ''; $memUsage = $statsParts[1].Trim(); $memPercent = $statsParts[2].Trim() -replace '%', ''; $netIO = $statsParts[3].Trim(); $blockIO = $statsParts[4].Trim() }
-                }
-                $healthResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' $($parts[0].Trim()) 2>/dev/null"
-                if ($healthResult) { $healthStatus = $healthResult.Trim() }
-            }
-            
-            $restartResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker inspect --format='{{.RestartCount}}' $($parts[0].Trim()) 2>/dev/null"
-            if ($restartResult -and $restartResult -match '^\d+$') { $restartCount = [int]$restartResult.Trim() }
-            
+
+            $cId = $parts[0].Trim()
+            $cName = $parts[1].Trim()
+            $cImage = $parts[2].Trim()
+            $cStatus = $parts[3].Trim()
+            $cPorts = $parts[4].Trim()
+            $cState = $parts[5].Trim()
+
+            if (-not [string]::IsNullOrEmpty($ContainerName) -and $cName -ne $ContainerName) { continue }
+
+            $shortId = $cId.Substring(0, [Math]::Min(12, $cId.Length))
+            $insp = if ($inspectMap.ContainsKey($shortId)) { $inspectMap[$shortId] } else { @{ Health = "N/A"; Restarts = 0 } }
+            $stat = if ($statsMap.ContainsKey($shortId)) { $statsMap[$shortId] } else { @{ CPU = $null; MemUsage = $null; MemPerc = $null } }
+
             $containerStatusColor = "Green"
-            if ($state -ne "running" -or $healthStatus -eq "unhealthy") { $containerStatusColor = "Red" }
-            elseif ($healthStatus -eq "starting" -or $restartCount -gt 5) { $containerStatusColor = "Yellow" }
-            
-            $containers += [PSCustomObject]@{ ContainerId = $parts[0].Trim(); Name = $parts[1].Trim(); Image = $parts[2].Trim(); State = $state; Status = $parts[3].Trim(); Ports = $parts[4].Trim(); HealthCheck = $healthStatus; CPUPercent = $cpuPercent; MemoryUsage = $memUsage; MemoryPercent = $memPercent; NetworkIO = $netIO; BlockIO = $blockIO; RestartCount = $restartCount; StatusColor = $containerStatusColor }
+            if ($cState -ne "running" -or $insp.Health -eq "unhealthy") { $containerStatusColor = "Red" }
+            elseif ($insp.Health -eq "starting" -or $insp.Restarts -gt 5) { $containerStatusColor = "Yellow" }
+
+            $containers += [PSCustomObject]@{ 
+                ContainerId = $cId
+                Name = $cName
+                Image = $cImage
+                State = $cState
+                Status = $cStatus
+                Ports = $cPorts
+                HealthCheck = $insp.Health
+                CPUPercent = $stat.CPU
+                MemoryUsage = $stat.MemUsage
+                MemoryPercent = $stat.MemPerc
+                NetworkIO = $null
+                BlockIO = $null
+                RestartCount = $insp.Restarts
+                StatusColor = $containerStatusColor 
+            }
         }
-        
+
         $overallStatus = "Healthy"; $overallColor = "Green"
         $runningCount = ($containers | Where-Object { $_.State -eq "running" }).Count
         $totalCount = $containers.Count
         $unhealthyCount = ($containers | Where-Object { $_.HealthCheck -eq "unhealthy" -or $_.State -ne "running" }).Count
-        
+
         if ($unhealthyCount -gt 0) { if ($runningCount -eq 0) { $overallStatus = "Critical"; $overallColor = "Red" } else { $overallStatus = "Warning"; $overallColor = "Yellow" } }
-        
+
         return [PSCustomObject]@{ ServerIP = $IP; Status = $overallStatus; StatusColor = $overallColor; TotalContainers = $totalCount; RunningContainers = $runningCount; StoppedContainers = $totalCount - $runningCount; UnhealthyContainers = $unhealthyCount; ErrorMessage = $null; Containers = $containers; LastChecked = Get-Date }
     }
     catch { return [PSCustomObject]@{ ServerIP = $IP; Status = "Error"; StatusColor = "Red"; TotalContainers = 0; RunningContainers = 0; StoppedContainers = 0; UnhealthyContainers = 0; ErrorMessage = $_.Exception.Message; Containers = @(); LastChecked = Get-Date } }
@@ -851,67 +859,48 @@ function Deploy-DockerService {
         [string]$User,
         [string]$Password,
         [string]$ServiceName,
-        [string]$ComposeContent
+        [string]$ComposeContent,
+        [string]$OSType = $null
     )
-    
+    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
     Write-Host "`nStarting $ServiceName deployment on $IP..." -ForegroundColor Cyan
     
     # 0. SMART FIX: Free up Port 53 from systemd-resolved if the config requires it
     if ($ComposeContent -match '53:53') {
         Write-Host "Port 53 detected in config. Freeing up port from systemd-resolved..." -ForegroundColor Yellow
         $dnsFixCmd = "sudo mkdir -p /etc/systemd/resolved.conf.d && echo '[Resolve]' | sudo tee /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && echo 'DNSStubListener=no' | sudo tee -a /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && sudo systemctl restart systemd-resolved 2>/dev/null || true"
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $dnsFixCmd | Out-Null
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $dnsFixCmd -OSType $os | Out-Null
     }
     
-    # 1. Create directory structures (Auto-detecting volumes from YAML)
+    # 1. Map Directories
     $dirCommand = "mkdir -p /home/$User/$ServiceName"
-    
-    # Auto-detect relative directories (e.g., ./data:/config)
     $matches = [regex]::Matches($ComposeContent, '-\s+"\./([^:]+):|-\s+\./([^:]+):')
     $dirs = @()
     foreach ($match in $matches) {
         $val = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
-        
-        # Prevent mkdir from trying to create files (like .yml or .json) as directories
-        if ($val -notmatch '\.(yml|yaml|json|txt|conf|ini|toml)$') {
-            $dirs += $val
-        }
+        if ($val -notmatch '\.(yml|yaml|json|txt|conf|ini|toml)$') { $dirs += $val }
     }
     $dirs = $dirs | Select-Object -Unique
+    foreach ($dir in $dirs) { $dirCommand += " /home/$User/$ServiceName/$dir" }
     
-    foreach ($dir in $dirs) {
-        $dirCommand += " /home/$User/$ServiceName/$dir"
-    }
-    
-    # Append || true to prevent script halt if a sub-folder already exists
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "$dirCommand 2>/dev/null || true" | Out-Null
-    
-    # 2. Check and cleanup existing compose stack dynamically
-    $composeExists = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "test -f /home/$User/$ServiceName/docker-compose.yml && echo 'exists'"
-    if ($composeExists -match "exists") {
-        Write-Host "Removing existing $ServiceName stack..." -ForegroundColor Yellow
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose down 2>/dev/null" | Out-Null
-    }
-    
-    # 3. Transfer Compose file
     $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($ComposeContent))
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "echo '$composeBase64' | base64 -d > /home/$User/$ServiceName/docker-compose.yml" | Out-Null
     
-    # 4. Verify Traefik network (only if the compose file actually needs it)
+    # BATCHED: Executes directories, compose file, teardown, networking, and deployment in a single SSH stream
+    $batchCmd = "$dirCommand 2>/dev/null || true;"
+    $batchCmd += " cd /home/$User/$ServiceName;"
+    $batchCmd += " sudo docker compose down 2>/dev/null || true;"
+    $batchCmd += " echo '$composeBase64' | base64 -d > docker-compose.yml;"
     if ($ComposeContent -match 'traefik-network') {
-        $networkCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network ls --filter name=traefik-network --format '{{.Name}}' 2>/dev/null"
-        if (-not ($networkCheck -match "traefik-network")) {
-            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network create traefik-network 2>&1 || true" | Out-Null
-        }
+        $batchCmd += " sudo docker network create traefik-network 2>/dev/null || true;"
     }
+    $batchCmd += " sudo docker compose up -d 2>&1"
     
-    # 5. Deploy container (Capture output for debugging)
     Write-Host "Deploying $ServiceName with Docker Compose..." -ForegroundColor Cyan
-    $deployResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose up -d 2>&1"
+    $deployResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os
     
-    # 6. Verify status dynamically by checking the compose stack directly
+    # Verify status
     Start-Sleep -Seconds 5
-    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose ps"
+    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose ps" -OSType $os
     
     if ($verifyResult -match "Up|running") {
         Write-Host "$ServiceName installed successfully!" -ForegroundColor Green
@@ -922,47 +911,34 @@ function Deploy-DockerService {
     }
 }
 function Install-Docker {
-    param([string]$IP, [string]$User, [string]$Password)
+    param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
+    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+    
     try {
-        $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version"
+        $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
         if ($null -ne $dockerCheck -and $dockerCheck -match "Docker version") { return $true }
         
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo apt-get update -y && sudo apt-get install -y ca-certificates curl" | Out-Null
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo install -m 0755 -d /etc/apt/keyrings" | Out-Null
+        # BATCHED INSTALL: Executes the entire Docker setup in a single SSH session
+        $installCmd = "sudo apt-get update -y && sudo apt-get install -y ca-certificates curl && "
+        $installCmd += "sudo install -m 0755 -d /etc/apt/keyrings && "
+        $installCmd += "OS_ID=`$(. /etc/os-release && echo `$ID) && "
+        $installCmd += "OS_CODE=`$(. /etc/os-release && echo `$VERSION_CODENAME) && "
+        $installCmd += "sudo curl -fsSL https://download.docker.com/linux/`$OS_ID/gpg -o /etc/apt/keyrings/docker.asc && "
+        $installCmd += "sudo chmod a+r /etc/apt/keyrings/docker.asc && sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources && "
+        $installCmd += "echo `"Types: deb`nURIs: https://download.docker.com/linux/`$OS_ID`nSuites: `$OS_CODE`nComponents: stable`nSigned-By: /etc/apt/keyrings/docker.asc`" | sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null && "
+        $installCmd += "sudo apt-get update -y && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && "
+        $installCmd += "sudo systemctl start docker && sudo systemctl enable docker && sudo usermod -aG docker $User"
         
-        $osIdResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command ". /etc/os-release && echo `$ID"
-        $osId = if ($osIdResult) { ($osIdResult -split "`n")[0].Trim() } else { "debian" }
-        if ([string]::IsNullOrWhiteSpace($osId)) { $osId = "debian" }
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $installCmd -OSType $os | Out-Null
         
-        $codenameResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command ". /etc/os-release && echo `$VERSION_CODENAME"
-        $codename = if ($codenameResult) { ($codenameResult -split "`n")[0].Trim() } else { "bullseye" }
-        if ([string]::IsNullOrWhiteSpace($codename)) { $codename = "bullseye" }
-        
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo curl -fsSL https://download.docker.com/linux/$osId/gpg -o /etc/apt/keyrings/docker.asc" | Out-Null
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo chmod a+r /etc/apt/keyrings/docker.asc && sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources" | Out-Null
-        
-        $setupRepoCommands = @(
-            "sudo bash -c 'echo ""Types: deb"" > /etc/apt/sources.list.d/docker.sources'",
-            "sudo bash -c 'echo ""URIs: https://download.docker.com/linux/$osId"" >> /etc/apt/sources.list.d/docker.sources'",
-            "sudo bash -c 'echo ""Suites: $codename"" >> /etc/apt/sources.list.d/docker.sources'",
-            "sudo bash -c 'echo ""Components: stable"" >> /etc/apt/sources.list.d/docker.sources'",
-            "sudo bash -c 'echo ""Signed-By: /etc/apt/keyrings/docker.asc"" >> /etc/apt/sources.list.d/docker.sources'"
-        )
-        foreach ($cmd in $setupRepoCommands) { Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $cmd | Out-Null }
-        
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo apt-get update -y && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin" | Out-Null
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo systemctl start docker && sudo systemctl enable docker && sudo usermod -aG docker $User" | Out-Null
-        
-        $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version"
+        $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
         return ($null -ne $verifyResult -and $verifyResult -match "Docker version")
     } catch { return $false }
 }
 
 function Install-Traefik {
-    param([string]$IP, [string]$User, [string]$Password, [string]$Email = "admin@localhost", [string]$Domain = "localhost")
-    
-    # Traefik requires the acme.json file to exist with strict permissions BEFORE deploy
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "mkdir -p /home/$User/traefik/letsencrypt && touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json" | Out-Null
+    param([string]$IP, [string]$User, [string]$Password, [string]$Email = "admin@localhost", [string]$Domain = "localhost", [string]$OSType = $null)
+    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
     
     $traefikConfig = @"
 api:
@@ -997,7 +973,10 @@ log:
   level: INFO
 "@
     $configBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($traefikConfig))
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "echo '$configBase64' | base64 -d > /home/$User/traefik/traefik.yml" | Out-Null
+    
+    # BATCHED: Directory creation, acme.json setup, and yaml transfer in one call
+    $batchCmd = "mkdir -p /home/$User/traefik/letsencrypt && touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json && echo '$configBase64' | base64 -d > /home/$User/traefik/traefik.yml"
+    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os | Out-Null
 
     $compose = @"
 services:
@@ -1019,7 +998,7 @@ networks:
   traefik-network:
     external: true
 "@
-    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "traefik" -ComposeContent $compose -DirectoriesToCreate @("letsencrypt")
+    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "traefik" -ComposeContent $compose -OSType $os
 }
 #endregion
 

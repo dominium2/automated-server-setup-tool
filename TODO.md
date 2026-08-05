@@ -10,10 +10,10 @@
 8. ## Test WSL install(setup unsuccessful due to target system being a VM)
 9. ## fix this broken project
 10. ## be able to let the user add their own services(done)
-11. ## be able to start, stop, restart the containers
+11. ## be able to start, stop, restart the containers(done)
 12. ## be able to run setup without traefik(done)
-13. ## Speed up setupprocess
-14. ## Speed up monitoring
+13. ## Speed up setupprocess(done-reduced from 10min to 2-3min)
+14. ## Speed up monitoring(done-reduced to 30s)
 15. ## Remove putty(needed to function)
 16. ## Remove Choco(done)
 17. ## Fix the testing
