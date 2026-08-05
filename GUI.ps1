@@ -322,8 +322,8 @@ function Get-AllServerConfigs {
             $null
         }
         
-        # Create configuration hashtable
-        $config = @{
+        # Create configuration object (Cast to PSCustomObject)
+        $config = [PSCustomObject]@{
             ServerNumber = $controls.ServerNumber
             IP = $controls.IPTextBox.Text
             User = $controls.UserTextBox.Text
@@ -335,7 +335,8 @@ function Get-AllServerConfigs {
         $allConfigs += $config
     }
     
-    return $allConfigs
+    # The unary comma prevents PowerShell from unrolling a single-item array
+    return ,$allConfigs
 }
 
 # Function to validate IP address format
