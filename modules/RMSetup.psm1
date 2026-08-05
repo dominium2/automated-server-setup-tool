@@ -843,131 +843,84 @@ function Test-CommonServices {
 #===============================================================================
 
 # UNIVERSAL HELPER: Replaces hundreds of lines of duplicate code in service installation functions.
+# UNIVERSAL HELPER: Replaces hundreds of lines of duplicate code in service installation functions.
+# UNIVERSAL HELPER: Replaces hundreds of lines of duplicate code in service installation functions.
 function Deploy-DockerService {
     param (
         [string]$IP,
         [string]$User,
         [string]$Password,
         [string]$ServiceName,
-        [string]$ComposeContent,
-        [string[]]$DirectoriesToCreate = @()
+        [string]$ComposeContent
     )
     
     Write-Host "`nStarting $ServiceName deployment on $IP..." -ForegroundColor Cyan
     
-    # 1. Create directory structures
+    # 0. SMART FIX: Free up Port 53 from systemd-resolved if the config requires it
+    if ($ComposeContent -match '53:53') {
+        Write-Host "Port 53 detected in config. Freeing up port from systemd-resolved..." -ForegroundColor Yellow
+        $dnsFixCmd = "sudo mkdir -p /etc/systemd/resolved.conf.d && echo '[Resolve]' | sudo tee /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && echo 'DNSStubListener=no' | sudo tee -a /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && sudo systemctl restart systemd-resolved 2>/dev/null || true"
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $dnsFixCmd | Out-Null
+    }
+    
+    # 1. Create directory structures (Auto-detecting volumes from YAML)
     $dirCommand = "mkdir -p /home/$User/$ServiceName"
-    foreach ($dir in $DirectoriesToCreate) {
+    
+    # Auto-detect relative directories (e.g., ./data:/config)
+    $matches = [regex]::Matches($ComposeContent, '-\s+"\./([^:]+):|-\s+\./([^:]+):')
+    $dirs = @()
+    foreach ($match in $matches) {
+        $val = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+        
+        # Prevent mkdir from trying to create files (like .yml or .json) as directories
+        if ($val -notmatch '\.(yml|yaml|json|txt|conf|ini|toml)$') {
+            $dirs += $val
+        }
+    }
+    $dirs = $dirs | Select-Object -Unique
+    
+    foreach ($dir in $dirs) {
         $dirCommand += " /home/$User/$ServiceName/$dir"
     }
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $dirCommand | Out-Null
     
-    # 2. Check and cleanup existing containers
-    $checkContainer = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker ps -a --filter name=$ServiceName --format '{{.Names}}' 2>/dev/null"
-    if ($checkContainer -match $ServiceName) {
-        Write-Host "Removing existing $ServiceName container..." -ForegroundColor Yellow
-        $composeExists = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "test -f /home/$User/$ServiceName/docker-compose.yml && echo 'exists'"
-        if ($composeExists -match "exists") {
-            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose down" | Out-Null
-        } else {
-            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker rm -f $ServiceName" | Out-Null
-        }
+    # Append || true to prevent script halt if a sub-folder already exists
+    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "$dirCommand 2>/dev/null || true" | Out-Null
+    
+    # 2. Check and cleanup existing compose stack dynamically
+    $composeExists = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "test -f /home/$User/$ServiceName/docker-compose.yml && echo 'exists'"
+    if ($composeExists -match "exists") {
+        Write-Host "Removing existing $ServiceName stack..." -ForegroundColor Yellow
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose down 2>/dev/null" | Out-Null
     }
     
     # 3. Transfer Compose file
     $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($ComposeContent))
     Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "echo '$composeBase64' | base64 -d > /home/$User/$ServiceName/docker-compose.yml" | Out-Null
     
-    # 4. Verify Traefik network
-    $networkCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network ls --filter name=traefik-network --format '{{.Name}}' 2>/dev/null"
-    if (-not ($networkCheck -match "traefik-network")) {
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network create traefik-network 2>&1 || true" | Out-Null
+    # 4. Verify Traefik network (only if the compose file actually needs it)
+    if ($ComposeContent -match 'traefik-network') {
+        $networkCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network ls --filter name=traefik-network --format '{{.Name}}' 2>/dev/null"
+        if (-not ($networkCheck -match "traefik-network")) {
+            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network create traefik-network 2>&1 || true" | Out-Null
+        }
     }
     
-    # 5. Deploy container
+    # 5. Deploy container (Capture output for debugging)
     Write-Host "Deploying $ServiceName with Docker Compose..." -ForegroundColor Cyan
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose up -d 2>&1" | Out-Null
+    $deployResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose up -d 2>&1"
     
-    # 6. Verify status
+    # 6. Verify status dynamically by checking the compose stack directly
     Start-Sleep -Seconds 5
-    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker ps --filter name=$ServiceName --format '{{.Status}}'"
+    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose ps"
     
-    if ($verifyResult -match "Up") {
+    if ($verifyResult -match "Up|running") {
         Write-Host "$ServiceName installed successfully!" -ForegroundColor Green
         return $true
     } else {
-        Write-Host "$ServiceName deployment failed." -ForegroundColor Red
+        Write-Host "$ServiceName deployment failed. Output: $deployResult" -ForegroundColor Red
         return $false
     }
 }
-
-function Install-AdGuard {
-    param([string]$IP, [string]$User, [string]$Password, [string]$Domain = "localhost")
-    $compose = @"
-services:
-  adguard:
-    container_name: adguard
-    image: adguard/adguardhome:latest
-    restart: always
-    volumes:
-      - ./work:/opt/adguardhome/work
-      - ./conf:/opt/adguardhome/conf
-    expose:
-      - 80
-      - 3000
-    ports:
-      - "53:53/tcp"
-      - "53:53/udp"
-    networks:
-      - traefik-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.adguard.rule=Host('adguard.$Domain')"
-      - "traefik.http.routers.adguard.entrypoints=websecure"
-      - "traefik.http.routers.adguard.tls.certresolver=letsencrypt"
-      - "traefik.http.services.adguard.loadbalancer.server.port=80"
-networks:
-  traefik-network:
-    external: true
-"@
-    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "adguard" -ComposeContent $compose -DirectoriesToCreate @("work", "conf")
-}
-
-function Install-Crafty {
-    param([string]$IP, [string]$User, [string]$Password, [string]$Domain = "localhost")
-    $compose = @"
-services:
-  crafty:
-    container_name: crafty
-    image: registry.gitlab.com/crafty-controller/crafty-4:latest
-    restart: always
-    environment:
-      - TZ=Etc/UTC
-    volumes:
-      - ./backups:/crafty/backups
-      - ./logs:/crafty/logs
-      - ./servers:/crafty/servers
-      - ./config:/crafty/app/config
-    expose:
-      - 8000
-    ports:
-      - "25565-25575:25565-25575"
-      - "19132-19142:19132-19142/udp"
-    networks:
-      - traefik-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.crafty.rule=Host('crafty.$Domain')"
-      - "traefik.http.routers.crafty.entrypoints=websecure"
-      - "traefik.http.routers.crafty.tls.certresolver=letsencrypt"
-      - "traefik.http.services.crafty.loadbalancer.server.port=8000"
-networks:
-  traefik-network:
-    external: true
-"@
-    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "crafty" -ComposeContent $compose -DirectoriesToCreate @("backups", "logs", "servers", "config")
-}
-
 function Install-Docker {
     param([string]$IP, [string]$User, [string]$Password)
     try {
@@ -1003,107 +956,6 @@ function Install-Docker {
         $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version"
         return ($null -ne $verifyResult -and $verifyResult -match "Docker version")
     } catch { return $false }
-}
-
-function Install-Heimdall {
-    param([string]$IP, [string]$User, [string]$Password, [string]$Domain = "localhost")
-    $compose = @"
-services:
-  heimdall:
-    container_name: heimdall
-    image: lscr.io/linuxserver/heimdall:latest
-    restart: always
-    environment:
-      - PUID=1000
-      - PGID=1000
-      - TZ=Europe/Brussels
-    volumes:
-      - heimdall_config:/config
-    expose:
-      - 80
-      - 443
-    networks:
-      - traefik-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.heimdall.rule=Host('heimdall.$Domain')"
-      - "traefik.http.routers.heimdall.entrypoints=websecure"
-      - "traefik.http.routers.heimdall.tls.certresolver=letsencrypt"
-      - "traefik.http.services.heimdall.loadbalancer.server.port=80"
-volumes:
-  heimdall_config:
-    name: heimdall_config
-networks:
-  traefik-network:
-    external: true
-"@
-    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "heimdall" -ComposeContent $compose -DirectoriesToCreate @("config")
-}
-
-function Install-N8N {
-    param([string]$IP, [string]$User, [string]$Password, [string]$Domain = "localhost")
-    $compose = @"
-services:
-  n8n:
-    container_name: n8n
-    image: n8nio/n8n:latest
-    restart: always
-    environment:
-      - N8N_HOST=n8n.$Domain
-      - N8N_PORT=5678
-      - N8N_PROTOCOL=https
-      - WEBHOOK_URL=https://n8n.$Domain
-      - GENERIC_TIMEZONE=Europe/Brussels
-    volumes:
-      - ./data:/home/node/.n8n
-    expose:
-      - 5678
-    networks:
-      - traefik-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.n8n.rule=Host('n8n.$Domain')"
-      - "traefik.http.routers.n8n.entrypoints=websecure"
-      - "traefik.http.routers.n8n.tls.certresolver=letsencrypt"
-      - "traefik.http.services.n8n.loadbalancer.server.port=5678"
-networks:
-  traefik-network:
-    external: true
-"@
-    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "n8n" -ComposeContent $compose -DirectoriesToCreate @("data")
-}
-
-function Install-Portainer {
-    param([string]$IP, [string]$User, [string]$Password, [string]$Domain = "localhost")
-    $compose = @"
-services:
-  portainer:
-    container_name: portainer
-    image: portainer/portainer-ce:lts
-    restart: always
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-      - portainer_data:/data
-    expose:
-      - 9443
-      - 8000
-    networks:
-      - traefik-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.http.routers.portainer.rule=Host('portainer.$Domain')"
-      - "traefik.http.routers.portainer.entrypoints=websecure"
-      - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
-      - "traefik.http.services.portainer.loadbalancer.server.port=9443"
-      - "traefik.http.services.portainer.loadbalancer.server.scheme=https"
-volumes:
-  portainer_data:
-    name: portainer_data
-networks:
-  traefik-network:
-    external: true
-"@
-    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "portainer" -ComposeContent $compose
 }
 
 function Install-Traefik {
@@ -1395,7 +1247,7 @@ Export-ModuleMember -Function @(
     'Initialize-Logging', 'Write-Log', 'Write-LogDebug', 'Write-LogInfo', 'Write-LogWarning', 'Write-LogError', 'Write-LogSuccess', 'Get-LogFilePath', 'Get-LogContent', 'Clear-OldLogs', 'Write-SessionSeparator',
     'Get-TargetOS', 'Test-SSHConnection', 'Test-WinRMConnection', 'Test-RemoteConnection', 'Invoke-WSLCommand', 'Invoke-RemoteCommand',
     'Get-ServerHealth', 'Get-LinuxServerHealth', 'Get-WindowsServerHealth', 'Get-ContainerHealth', 'Get-ContainerLogs', 'Restart-Container', 'Stop-Container', 'Start-Container', 'Get-FullHealthReport', 'Format-HealthReport', 'Test-ServiceHealth', 'Test-CommonServices',
-    'Install-AdGuard', 'Install-Crafty', 'Install-Docker', 'Install-Heimdall', 'Install-N8N', 'Install-Portainer', 'Install-Traefik',
+    'Install-Docker', 'Install-Traefik', 'Deploy-DockerService',
     'Test-WSLReady', 'Install-WSL2', 'Invoke-WSL2Reboot'
 )
 #endregion

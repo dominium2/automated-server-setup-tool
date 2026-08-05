@@ -9,14 +9,14 @@
 7. ## docker install(DONE)
 8. ## Test WSL install(setup unsuccessful due to target system being a VM)
 9. ## fix this broken project
-10. ## be able to let the user add their own services
+10. ## be able to let the user add their own services(done)
 11. ## be able to start, stop, restart the containers
-12. ## be able to run setup without traefik
+12. ## be able to run setup without traefik(done)
 13. ## Speed up setupprocess
-14. ## Speed up monitoring (8 minutes is unacceptable)
+14. ## Speed up monitoring
 15. ## Remove putty(needed to function)
 16. ## Remove Choco(done)
 17. ## Fix the testing
 18. ## Document code thurougly
 19. ## Fix WSL2 install
-20. ## change/overhall code structure (code is all over the place)
+20. ## change/overhall code structure (code is all over the place)(done)

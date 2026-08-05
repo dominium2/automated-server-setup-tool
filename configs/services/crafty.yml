@@ -1,0 +1,28 @@
+services:
+  crafty:
+    container_name: crafty
+    image: registry.gitlab.com/crafty-controller/crafty-4:latest
+    restart: always
+    environment:
+      - TZ=Etc/UTC
+    volumes:
+      - ./backups:/crafty/backups
+      - ./logs:/crafty/logs
+      - ./servers:/crafty/servers
+      - ./config:/crafty/app/config
+    expose:
+      - 8000
+    ports:
+      - "25565-25575:25565-25575"
+      - "19132-19142:19132-19142/udp"
+    networks:
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.crafty.rule=Host('crafty.localhost')"
+      - "traefik.http.routers.crafty.entrypoints=websecure"
+      - "traefik.http.routers.crafty.tls.certresolver=letsencrypt"
+      - "traefik.http.services.crafty.loadbalancer.server.port=8000"
+networks:
+  traefik-network:
+    external: true
