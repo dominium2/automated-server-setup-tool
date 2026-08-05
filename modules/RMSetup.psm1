@@ -855,67 +855,48 @@ function Deploy-DockerService {
         [string]$User,
         [string]$Password,
         [string]$ServiceName,
-        [string]$ComposeContent
+        [string]$ComposeContent,
+        [string]$OSType = $null
     )
-    
+    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
     Write-Host "`nStarting $ServiceName deployment on $IP..." -ForegroundColor Cyan
     
     # 0. SMART FIX: Free up Port 53 from systemd-resolved if the config requires it
     if ($ComposeContent -match '53:53') {
         Write-Host "Port 53 detected in config. Freeing up port from systemd-resolved..." -ForegroundColor Yellow
         $dnsFixCmd = "sudo mkdir -p /etc/systemd/resolved.conf.d && echo '[Resolve]' | sudo tee /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && echo 'DNSStubListener=no' | sudo tee -a /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && sudo systemctl restart systemd-resolved 2>/dev/null || true"
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $dnsFixCmd | Out-Null
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $dnsFixCmd -OSType $os | Out-Null
     }
     
-    # 1. Create directory structures (Auto-detecting volumes from YAML)
+    # 1. Map Directories
     $dirCommand = "mkdir -p /home/$User/$ServiceName"
-    
-    # Auto-detect relative directories (e.g., ./data:/config)
     $matches = [regex]::Matches($ComposeContent, '-\s+"\./([^:]+):|-\s+\./([^:]+):')
     $dirs = @()
     foreach ($match in $matches) {
         $val = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
-        
-        # Prevent mkdir from trying to create files (like .yml or .json) as directories
-        if ($val -notmatch '\.(yml|yaml|json|txt|conf|ini|toml)$') {
-            $dirs += $val
-        }
+        if ($val -notmatch '\.(yml|yaml|json|txt|conf|ini|toml)$') { $dirs += $val }
     }
     $dirs = $dirs | Select-Object -Unique
+    foreach ($dir in $dirs) { $dirCommand += " /home/$User/$ServiceName/$dir" }
     
-    foreach ($dir in $dirs) {
-        $dirCommand += " /home/$User/$ServiceName/$dir"
-    }
-    
-    # Append || true to prevent script halt if a sub-folder already exists
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "$dirCommand 2>/dev/null || true" | Out-Null
-    
-    # 2. Check and cleanup existing compose stack dynamically
-    $composeExists = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "test -f /home/$User/$ServiceName/docker-compose.yml && echo 'exists'"
-    if ($composeExists -match "exists") {
-        Write-Host "Removing existing $ServiceName stack..." -ForegroundColor Yellow
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose down 2>/dev/null" | Out-Null
-    }
-    
-    # 3. Transfer Compose file
     $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($ComposeContent))
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "echo '$composeBase64' | base64 -d > /home/$User/$ServiceName/docker-compose.yml" | Out-Null
     
-    # 4. Verify Traefik network (only if the compose file actually needs it)
+    # BATCHED: Executes directories, compose file, teardown, networking, and deployment in a single SSH stream
+    $batchCmd = "$dirCommand 2>/dev/null || true;"
+    $batchCmd += " cd /home/$User/$ServiceName;"
+    $batchCmd += " sudo docker compose down 2>/dev/null || true;"
+    $batchCmd += " echo '$composeBase64' | base64 -d > docker-compose.yml;"
     if ($ComposeContent -match 'traefik-network') {
-        $networkCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network ls --filter name=traefik-network --format '{{.Name}}' 2>/dev/null"
-        if (-not ($networkCheck -match "traefik-network")) {
-            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo docker network create traefik-network 2>&1 || true" | Out-Null
-        }
+        $batchCmd += " sudo docker network create traefik-network 2>/dev/null || true;"
     }
+    $batchCmd += " sudo docker compose up -d 2>&1"
     
-    # 5. Deploy container (Capture output for debugging)
     Write-Host "Deploying $ServiceName with Docker Compose..." -ForegroundColor Cyan
-    $deployResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose up -d 2>&1"
+    $deployResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os
     
-    # 6. Verify status dynamically by checking the compose stack directly
+    # Verify status
     Start-Sleep -Seconds 5
-    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose ps"
+    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose ps" -OSType $os
     
     if ($verifyResult -match "Up|running") {
         Write-Host "$ServiceName installed successfully!" -ForegroundColor Green
@@ -926,47 +907,34 @@ function Deploy-DockerService {
     }
 }
 function Install-Docker {
-    param([string]$IP, [string]$User, [string]$Password)
+    param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
+    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+    
     try {
-        $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version"
+        $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
         if ($null -ne $dockerCheck -and $dockerCheck -match "Docker version") { return $true }
         
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo apt-get update -y && sudo apt-get install -y ca-certificates curl" | Out-Null
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo install -m 0755 -d /etc/apt/keyrings" | Out-Null
+        # BATCHED INSTALL: Executes the entire Docker setup in a single SSH session
+        $installCmd = "sudo apt-get update -y && sudo apt-get install -y ca-certificates curl && "
+        $installCmd += "sudo install -m 0755 -d /etc/apt/keyrings && "
+        $installCmd += "OS_ID=`$(. /etc/os-release && echo `$ID) && "
+        $installCmd += "OS_CODE=`$(. /etc/os-release && echo `$VERSION_CODENAME) && "
+        $installCmd += "sudo curl -fsSL https://download.docker.com/linux/`$OS_ID/gpg -o /etc/apt/keyrings/docker.asc && "
+        $installCmd += "sudo chmod a+r /etc/apt/keyrings/docker.asc && sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources && "
+        $installCmd += "echo `"Types: deb`nURIs: https://download.docker.com/linux/`$OS_ID`nSuites: `$OS_CODE`nComponents: stable`nSigned-By: /etc/apt/keyrings/docker.asc`" | sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null && "
+        $installCmd += "sudo apt-get update -y && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && "
+        $installCmd += "sudo systemctl start docker && sudo systemctl enable docker && sudo usermod -aG docker $User"
         
-        $osIdResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command ". /etc/os-release && echo `$ID"
-        $osId = if ($osIdResult) { ($osIdResult -split "`n")[0].Trim() } else { "debian" }
-        if ([string]::IsNullOrWhiteSpace($osId)) { $osId = "debian" }
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $installCmd -OSType $os | Out-Null
         
-        $codenameResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command ". /etc/os-release && echo `$VERSION_CODENAME"
-        $codename = if ($codenameResult) { ($codenameResult -split "`n")[0].Trim() } else { "bullseye" }
-        if ([string]::IsNullOrWhiteSpace($codename)) { $codename = "bullseye" }
-        
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo curl -fsSL https://download.docker.com/linux/$osId/gpg -o /etc/apt/keyrings/docker.asc" | Out-Null
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo chmod a+r /etc/apt/keyrings/docker.asc && sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources" | Out-Null
-        
-        $setupRepoCommands = @(
-            "sudo bash -c 'echo ""Types: deb"" > /etc/apt/sources.list.d/docker.sources'",
-            "sudo bash -c 'echo ""URIs: https://download.docker.com/linux/$osId"" >> /etc/apt/sources.list.d/docker.sources'",
-            "sudo bash -c 'echo ""Suites: $codename"" >> /etc/apt/sources.list.d/docker.sources'",
-            "sudo bash -c 'echo ""Components: stable"" >> /etc/apt/sources.list.d/docker.sources'",
-            "sudo bash -c 'echo ""Signed-By: /etc/apt/keyrings/docker.asc"" >> /etc/apt/sources.list.d/docker.sources'"
-        )
-        foreach ($cmd in $setupRepoCommands) { Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $cmd | Out-Null }
-        
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo apt-get update -y && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin" | Out-Null
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "sudo systemctl start docker && sudo systemctl enable docker && sudo usermod -aG docker $User" | Out-Null
-        
-        $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version"
+        $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
         return ($null -ne $verifyResult -and $verifyResult -match "Docker version")
     } catch { return $false }
 }
 
 function Install-Traefik {
-    param([string]$IP, [string]$User, [string]$Password, [string]$Email = "admin@localhost", [string]$Domain = "localhost")
-    
-    # Traefik requires the acme.json file to exist with strict permissions BEFORE deploy
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "mkdir -p /home/$User/traefik/letsencrypt && touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json" | Out-Null
+    param([string]$IP, [string]$User, [string]$Password, [string]$Email = "admin@localhost", [string]$Domain = "localhost", [string]$OSType = $null)
+    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
     
     $traefikConfig = @"
 api:
@@ -1001,7 +969,10 @@ log:
   level: INFO
 "@
     $configBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($traefikConfig))
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "echo '$configBase64' | base64 -d > /home/$User/traefik/traefik.yml" | Out-Null
+    
+    # BATCHED: Directory creation, acme.json setup, and yaml transfer in one call
+    $batchCmd = "mkdir -p /home/$User/traefik/letsencrypt && touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json && echo '$configBase64' | base64 -d > /home/$User/traefik/traefik.yml"
+    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os | Out-Null
 
     $compose = @"
 services:
@@ -1023,7 +994,7 @@ networks:
   traefik-network:
     external: true
 "@
-    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "traefik" -ComposeContent $compose -DirectoriesToCreate @("letsencrypt")
+    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "traefik" -ComposeContent $compose -OSType $os
 }
 #endregion
 
