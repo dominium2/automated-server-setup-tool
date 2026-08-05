@@ -933,15 +933,17 @@ function Show-HealthMonitorWindow {
         $healthCheckScript = {
             param($Config, $OutputQueue, $ModulesPath)
             
-            # Use consolidated RMSetup module instead of deprecated individual modules
             Import-Module "$ModulesPath\RMSetup.psm1" -Force -ErrorAction SilentlyContinue
             
             $serverHealth = $null
             $containerHealth = $null
             
+            # Detect target OS once and pass it down to eliminate redundant TCP port probing
+            $osType = Get-TargetOS -IP $Config.IP
+            
             try {
-                # Get server health
-                $serverHealth = Get-ServerHealth -IP $Config.IP -User $Config.User -Password $Config.Password
+                # Get server health with cached OS
+                $serverHealth = Get-ServerHealth -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
             }
             catch {
                 $serverHealth = [PSCustomObject]@{
@@ -954,8 +956,8 @@ function Show-HealthMonitorWindow {
             }
             
             try {
-                # Get container health
-                $containerHealth = Get-ContainerHealth -IP $Config.IP -User $Config.User -Password $Config.Password
+                # Get container health with cached OS
+                $containerHealth = Get-ContainerHealth -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
             }
             catch {
                 $containerHealth = [PSCustomObject]@{

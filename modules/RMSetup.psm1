@@ -489,25 +489,21 @@ function Invoke-RemoteCommand {
         [string]$Password,
         
         [Parameter(Mandatory=$true)]
-        [string]$Command
+        [string]$Command,
+
+        [string]$OSType = $null
     )
     
     try {
-        Write-LogDebug -Message "Executing remote command on $IP" -Component "RemoteCommand"
-        
-        # Detect the OS
-        $osType = Get-TargetOS -IP $IP
+        # Use provided OSType to prevent re-running TCP port checks on every call
+        $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
         
         if ($osType -eq "Linux") {
-            Write-LogDebug -Message "Using SSH for command execution on $IP" -Component "RemoteCommand"
-            
             # EXPLANATION FOR PLINK:
             # Native Windows OpenSSH (ssh.exe) does not allow passing passwords via script parameters.
             # plink is required here to automate the password injection using '-pw' and '-batch'.
             if (-not (Get-Command plink -ErrorAction SilentlyContinue)) {
                 Write-LogError -Message "plink not found - required for SSH command execution" -Component "RemoteCommand"
-                Write-Host "Error: 'plink' (PuTTY) is required for SSH connection" -ForegroundColor Red
-                Write-Host "Install with: choco install putty -y" -ForegroundColor Yellow
                 return $null
             }
             
@@ -517,46 +513,19 @@ function Invoke-RemoteCommand {
                 Write-LogError -Message "SSH command failed on ${IP}: $result" -Component "RemoteCommand"
                 return $null
             }
-            
-            Write-LogDebug -Message "SSH command completed successfully on $IP" -Component "RemoteCommand"
             return $result
         }
         elseif ($osType -eq "Windows") {
-            Write-LogDebug -Message "Using WSL2 for command execution on $IP" -Component "RemoteCommand"
-            # Use WSL2 for Windows systems
             $wslResult = Invoke-WSLCommand -IP $IP -User $User -Password $Password -Command $Command
-            
-            if ($null -eq $wslResult) {
-                Write-LogError -Message "WSL command execution failed on $IP" -Component "RemoteCommand"
-                Write-Host "WSL command execution failed" -ForegroundColor Red
-                return $null
-            }
-            
-            # Check for distribution errors
-            if ($wslResult.ExitCode -ne 0 -and $wslResult.Output -match "no distribution|not found") {
-                Write-LogError -Message "WSL distribution error on ${IP}: $($wslResult.Output)" -Component "RemoteCommand"
-                Write-Host "Error: $($wslResult.Output)" -ForegroundColor Red
-                return $null
-            }
-            
-            if ($wslResult.ExitCode -ne 0 -and $wslResult.Output -match "error|fatal|failed|denied|cannot|permission denied") {
-                Write-LogWarning -Message "WSL command error on ${IP}: $($wslResult.Output)" -Component "RemoteCommand"
-                Write-Host "Command error: $($wslResult.Output)" -ForegroundColor Yellow
-                return $null
-            }
-            
-            Write-LogDebug -Message "WSL command completed successfully on $IP" -Component "RemoteCommand"
+            if ($null -eq $wslResult) { return $null }
             return $wslResult.Output
         }
         else {
-            Write-LogError -Message "Unable to detect OS type for $IP" -Component "RemoteCommand"
-            Write-Host "Unable to detect OS type for $IP" -ForegroundColor Red
             return $null
         }
     }
     catch {
         Write-LogError -Message "Error executing remote command on $IP" -Component "RemoteCommand" -Exception $_.Exception
-        Write-Host "Error executing remote command: $($_.Exception.Message)" -ForegroundColor Red
         return $null
     }
 }
@@ -567,14 +536,15 @@ function Invoke-RemoteCommand {
 #===============================================================================
 
 function Get-ServerHealth {
-    param([string]$IP, [string]$User, [string]$Password)
+    param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
     try {
-        $pingResult = Test-Connection -ComputerName $IP -Count 2 -Quiet -ErrorAction SilentlyContinue
+        $pingResult = Test-Connection -ComputerName $IP -Count 1 -Quiet -ErrorAction SilentlyContinue
         if (-not $pingResult) {
             return [PSCustomObject]@{ IP = $IP; Status = "Offline"; StatusColor = "Red"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = "Server not reachable" }
         }
-        $osType = Get-TargetOS -IP $IP
-        if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password $Password }
+        
+        $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+        if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password $Password -OSType $osType }
         elseif ($osType -eq "Windows") { return Get-WindowsServerHealth -IP $IP -User $User -Password $Password }
         else { return [PSCustomObject]@{ IP = $IP; Status = "Unknown"; StatusColor = "Yellow"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = "Could not detect OS type" } }
     }
@@ -582,7 +552,7 @@ function Get-ServerHealth {
 }
 
 function Get-LinuxServerHealth {
-    param([string]$IP, [string]$User, [string]$Password)
+    param([string]$IP, [string]$User, [string]$Password, [string]$OSType = "Linux")
     try {
         $healthCommand = @"
 echo '===CPU===' && top -bn1 | grep 'Cpu(s)' | awk '{print 100 - `$8}' && \
@@ -591,7 +561,7 @@ echo '===DISK===' && df -h / | awk 'NR==2{print `$5}' | tr -d '%' && \
 echo '===UPTIME===' && uptime -p && \
 echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
 "@
-        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $healthCommand
+        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $healthCommand -OSType $OSType
         if ($null -eq $result) { throw "Failed to retrieve health metrics" }
         
         $resultLines = $result -split "`n"
@@ -615,7 +585,6 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
                 }
                 "MEMORY" { 
                     $memParts = $line -split '\s+'
-                    # SECURITY GUARD: Ensure the parsed strings are actually numbers before casting
                     if ($memParts.Count -ge 3 -and $memParts[0] -match '^\d+\.?\d*$' -and $memParts[1] -match '^\d+\.?\d*$') { 
                         $memoryUsed = [double]$memParts[0]
                         $memoryTotal = [double]$memParts[1]
@@ -636,19 +605,14 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
                 }
                 "LOAD" { 
                     $loadParts = $line -split '\s+'
-                    # Check if the load outputs are actually numbers (load format is like 0.01 0.05 0.00)
                     if ($loadParts.Count -ge 3 -and $loadParts[0] -match '^\d+\.?\d*$') { 
-                        $load1 = $loadParts[0]
-                        $load5 = $loadParts[1]
-                        $load15 = $loadParts[2] 
+                        $load1 = $loadParts[0]; $load5 = $loadParts[1]; $load15 = $loadParts[2] 
                     } 
                 }
             }
         }
         
         $status = "Healthy"; $statusColor = "Green"
-        
-        # Determine status, treating missing data ($null) safely
         if (($cpuUsage -ne $null -and $cpuUsage -gt 90) -or ($memoryPercent -ne $null -and $memoryPercent -gt 90) -or ($diskPercent -ne $null -and $diskPercent -gt 90)) { 
             $status = "Critical"; $statusColor = "Red" 
         }
@@ -656,7 +620,6 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
             $status = "Warning"; $statusColor = "Yellow" 
         }
         elseif ($cpuUsage -eq $null -and $memoryPercent -eq $null) {
-            # If we couldn't parse the metrics, degrade the status gracefully instead of crashing
             $status = "Degraded"; $statusColor = "Yellow"
         }
         
@@ -703,59 +666,100 @@ function Get-WindowsServerHealth {
 }
 
 function Get-ContainerHealth {
-    param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName = $null)
+    param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName = $null, [string]$OSType = $null)
     try {
-        $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker info --format '{{.ServerVersion}}' 2>/dev/null || echo 'DOCKER_NOT_RUNNING'"
-        if ($null -eq $dockerCheck -or $dockerCheck -match "DOCKER_NOT_RUNNING|Cannot connect|permission denied") {
-            return @([PSCustomObject]@{ ServerIP = $IP; Status = "DockerNotAccessible"; StatusColor = "Red"; ErrorMessage = "Docker not accessible"; Containers = @() })
+        $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+
+        # Single batch command: fetches container listing, inspect data, and stats in ONE SSH roundtrip
+        $batchCommand = 'docker ps -a --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.State}}" 2>/dev/null && echo "===INSPECT===" && (docker inspect --format "{{.ID}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}|{{.RestartCount}}" $(docker ps -aq 2>/dev/null) 2>/dev/null || true) && echo "===STATS===" && (docker stats --no-stream --format "{{.ID}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}" 2>/dev/null || true)'
+
+        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCommand -OSType $osType
+        
+        if ($null -eq $result -or [string]::IsNullOrWhiteSpace($result)) {
+            return [PSCustomObject]@{ ServerIP = $IP; Status = "DockerNotAccessible"; StatusColor = "Red"; ErrorMessage = "Docker not accessible"; Containers = @() }
         }
+
+        # Parse sections
+        $sections = $result -split "===INSPECT==="
+        $psOutput = $sections[0]
         
-        $containerFilter = if (-not [string]::IsNullOrEmpty($ContainerName)) { "--filter `"name=$ContainerName`"" } else { "" }
-        $containerCommand = "docker ps -a $containerFilter --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.State}}' 2>/dev/null"
-        $containerList = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $containerCommand
-        
-        if ($null -eq $containerList -or [string]::IsNullOrWhiteSpace($containerList)) {
-            return @([PSCustomObject]@{ ServerIP = $IP; Status = "NoContainers"; StatusColor = "Gray"; ErrorMessage = $null; Containers = @() })
+        $inspectOutput = ""
+        $statsOutput = ""
+        if ($sections.Count -gt 1) {
+            $subSections = $sections[1] -split "===STATS==="
+            $inspectOutput = $subSections[0]
+            if ($subSections.Count -gt 1) { $statsOutput = $subSections[1] }
         }
-        
+
+        # Index inspection data by short container ID
+        $inspectMap = @{}
+        foreach ($line in ($inspectOutput -split "`n")) {
+            $p = $line.Trim() -split '\|'
+            if ($p.Count -ge 3) {
+                $shortId = $p[0].Trim().Substring(0, [Math]::Min(12, $p[0].Trim().Length))
+                $inspectMap[$shortId] = @{ Health = $p[1].Trim(); Restarts = [int]($p[2].Trim() -as [int]) }
+            }
+        }
+
+        # Index stats data by short container ID
+        $statsMap = @{}
+        foreach ($line in ($statsOutput -split "`n")) {
+            $p = $line.Trim() -split '\|'
+            if ($p.Count -ge 4) {
+                $shortId = $p[0].Trim().Substring(0, [Math]::Min(12, $p[0].Trim().Length))
+                $statsMap[$shortId] = @{ CPU = $p[1].Trim() -replace '%', ''; MemUsage = $p[2].Trim(); MemPerc = $p[3].Trim() -replace '%', '' }
+            }
+        }
+
         $containers = @()
-        $containerLines = $containerList -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-        
+        $containerLines = $psOutput -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+
         foreach ($line in $containerLines) {
             $parts = $line -split '\|'
             if ($parts.Count -lt 6) { continue }
-            
-            $state = $parts[5].Trim()
-            $cpuPercent = $null; $memUsage = $null; $memPercent = $null; $netIO = $null; $blockIO = $null; $restartCount = 0; $healthStatus = "N/A"
-            
-            if ($state -eq "running") {
-                $statsCommand = "docker stats $($parts[0].Trim()) --no-stream --format '{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}' 2>/dev/null"
-                $stats = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $statsCommand
-                if ($stats) {
-                    $statsParts = $stats.Trim() -split '\|'
-                    if ($statsParts.Count -ge 5) { $cpuPercent = $statsParts[0].Trim() -replace '%', ''; $memUsage = $statsParts[1].Trim(); $memPercent = $statsParts[2].Trim() -replace '%', ''; $netIO = $statsParts[3].Trim(); $blockIO = $statsParts[4].Trim() }
-                }
-                $healthResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker inspect --format='{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' $($parts[0].Trim()) 2>/dev/null"
-                if ($healthResult) { $healthStatus = $healthResult.Trim() }
-            }
-            
-            $restartResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker inspect --format='{{.RestartCount}}' $($parts[0].Trim()) 2>/dev/null"
-            if ($restartResult -and $restartResult -match '^\d+$') { $restartCount = [int]$restartResult.Trim() }
-            
+
+            $cId = $parts[0].Trim()
+            $cName = $parts[1].Trim()
+            $cImage = $parts[2].Trim()
+            $cStatus = $parts[3].Trim()
+            $cPorts = $parts[4].Trim()
+            $cState = $parts[5].Trim()
+
+            if (-not [string]::IsNullOrEmpty($ContainerName) -and $cName -ne $ContainerName) { continue }
+
+            $shortId = $cId.Substring(0, [Math]::Min(12, $cId.Length))
+            $insp = if ($inspectMap.ContainsKey($shortId)) { $inspectMap[$shortId] } else { @{ Health = "N/A"; Restarts = 0 } }
+            $stat = if ($statsMap.ContainsKey($shortId)) { $statsMap[$shortId] } else { @{ CPU = $null; MemUsage = $null; MemPerc = $null } }
+
             $containerStatusColor = "Green"
-            if ($state -ne "running" -or $healthStatus -eq "unhealthy") { $containerStatusColor = "Red" }
-            elseif ($healthStatus -eq "starting" -or $restartCount -gt 5) { $containerStatusColor = "Yellow" }
-            
-            $containers += [PSCustomObject]@{ ContainerId = $parts[0].Trim(); Name = $parts[1].Trim(); Image = $parts[2].Trim(); State = $state; Status = $parts[3].Trim(); Ports = $parts[4].Trim(); HealthCheck = $healthStatus; CPUPercent = $cpuPercent; MemoryUsage = $memUsage; MemoryPercent = $memPercent; NetworkIO = $netIO; BlockIO = $blockIO; RestartCount = $restartCount; StatusColor = $containerStatusColor }
+            if ($cState -ne "running" -or $insp.Health -eq "unhealthy") { $containerStatusColor = "Red" }
+            elseif ($insp.Health -eq "starting" -or $insp.Restarts -gt 5) { $containerStatusColor = "Yellow" }
+
+            $containers += [PSCustomObject]@{ 
+                ContainerId = $cId
+                Name = $cName
+                Image = $cImage
+                State = $cState
+                Status = $cStatus
+                Ports = $cPorts
+                HealthCheck = $insp.Health
+                CPUPercent = $stat.CPU
+                MemoryUsage = $stat.MemUsage
+                MemoryPercent = $stat.MemPerc
+                NetworkIO = $null
+                BlockIO = $null
+                RestartCount = $insp.Restarts
+                StatusColor = $containerStatusColor 
+            }
         }
-        
+
         $overallStatus = "Healthy"; $overallColor = "Green"
         $runningCount = ($containers | Where-Object { $_.State -eq "running" }).Count
         $totalCount = $containers.Count
         $unhealthyCount = ($containers | Where-Object { $_.HealthCheck -eq "unhealthy" -or $_.State -ne "running" }).Count
-        
+
         if ($unhealthyCount -gt 0) { if ($runningCount -eq 0) { $overallStatus = "Critical"; $overallColor = "Red" } else { $overallStatus = "Warning"; $overallColor = "Yellow" } }
-        
+
         return [PSCustomObject]@{ ServerIP = $IP; Status = $overallStatus; StatusColor = $overallColor; TotalContainers = $totalCount; RunningContainers = $runningCount; StoppedContainers = $totalCount - $runningCount; UnhealthyContainers = $unhealthyCount; ErrorMessage = $null; Containers = $containers; LastChecked = Get-Date }
     }
     catch { return [PSCustomObject]@{ ServerIP = $IP; Status = "Error"; StatusColor = "Red"; TotalContainers = 0; RunningContainers = 0; StoppedContainers = 0; UnhealthyContainers = 0; ErrorMessage = $_.Exception.Message; Containers = @(); LastChecked = Get-Date } }
