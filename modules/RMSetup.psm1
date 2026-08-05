@@ -675,6 +675,10 @@ function Get-ContainerHealth {
 
         $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCommand -OSType $osType
         
+        # THE FIX: Plink and WSL return arrays of lines. Join them into a single multiline string 
+        # so the section markers split the massive block of text properly!
+        $result = $result -join "`n"
+        
         if ($null -eq $result -or [string]::IsNullOrWhiteSpace($result)) {
             return [PSCustomObject]@{ ServerIP = $IP; Status = "DockerNotAccessible"; StatusColor = "Red"; ErrorMessage = "Docker not accessible"; Containers = @() }
         }
