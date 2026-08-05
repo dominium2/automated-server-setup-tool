@@ -172,24 +172,18 @@ function Write-TerminalOutput {
 # Function to create a new server box
 function Add-ServerBox {
     $script:serverCount++
-    
-    # Create GroupBox
     $groupBox = New-Object System.Windows.Controls.GroupBox
     $groupBox.Header = "Server$($script:serverCount)"
     $groupBox.Padding = "10"
     $groupBox.Margin = "0,0,0,10"
-    
-    # Create Grid for layout
     $grid = New-Object System.Windows.Controls.Grid
     
-    # Add row definitions
-    0..4 | ForEach-Object {
+    0..6 | ForEach-Object {
         $rowDef = New-Object System.Windows.Controls.RowDefinition
         $rowDef.Height = "Auto"
         [void]$grid.RowDefinitions.Add($rowDef)
     }
     
-    # Add column definitions
     $col1 = New-Object System.Windows.Controls.ColumnDefinition
     $col1.Width = 100
     $col2 = New-Object System.Windows.Controls.ColumnDefinition
@@ -197,145 +191,90 @@ function Add-ServerBox {
     [void]$grid.ColumnDefinitions.Add($col1)
     [void]$grid.ColumnDefinitions.Add($col2)
     
-    # IP Address Field
-    $ipLabel = New-Object System.Windows.Controls.Label
-    $ipLabel.Content = "IP Address:"
-    $ipLabel.VerticalAlignment = "Center"
-    $ipLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($ipLabel, 0)
-    [System.Windows.Controls.Grid]::SetColumn($ipLabel, 0)
-    [void]$grid.Children.Add($ipLabel)
+    # 0. IP
+    $ipLabel = New-Object System.Windows.Controls.Label; $ipLabel.Content = "IP Address:"; $ipLabel.VerticalAlignment = "Center"; $ipLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($ipLabel, 0); [System.Windows.Controls.Grid]::SetColumn($ipLabel, 0); [void]$grid.Children.Add($ipLabel)
+    $ipTextBox = New-Object System.Windows.Controls.TextBox; $ipTextBox.Height = 25; $ipTextBox.Margin = "0,5"; $ipTextBox.Name = "IPField$($script:serverCount)"
+    [System.Windows.Controls.Grid]::SetRow($ipTextBox, 0); [System.Windows.Controls.Grid]::SetColumn($ipTextBox, 1); [void]$grid.Children.Add($ipTextBox)
     
-    $ipTextBox = New-Object System.Windows.Controls.TextBox
-    $ipTextBox.Height = 25
-    $ipTextBox.Margin = "0,5"
-    $ipTextBox.Name = "IPField$($script:serverCount)"
-    [System.Windows.Controls.Grid]::SetRow($ipTextBox, 0)
-    [System.Windows.Controls.Grid]::SetColumn($ipTextBox, 1)
-    [void]$grid.Children.Add($ipTextBox)
+    # 1. User
+    $userLabel = New-Object System.Windows.Controls.Label; $userLabel.Content = "User:"; $userLabel.VerticalAlignment = "Center"; $userLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($userLabel, 1); [System.Windows.Controls.Grid]::SetColumn($userLabel, 0); [void]$grid.Children.Add($userLabel)
+    $userTextBox = New-Object System.Windows.Controls.TextBox; $userTextBox.Height = 25; $userTextBox.Margin = "0,5"; $userTextBox.Name = "UserField$($script:serverCount)"
+    [System.Windows.Controls.Grid]::SetRow($userTextBox, 1); [System.Windows.Controls.Grid]::SetColumn($userTextBox, 1); [void]$grid.Children.Add($userTextBox)
     
-    # User Field
-    $userLabel = New-Object System.Windows.Controls.Label
-    $userLabel.Content = "User:"
-    $userLabel.VerticalAlignment = "Center"
-    $userLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($userLabel, 1)
-    [System.Windows.Controls.Grid]::SetColumn($userLabel, 0)
-    [void]$grid.Children.Add($userLabel)
+    # 2. Password
+    $passwordLabel = New-Object System.Windows.Controls.Label; $passwordLabel.Content = "Password:"; $passwordLabel.VerticalAlignment = "Center"; $passwordLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($passwordLabel, 2); [System.Windows.Controls.Grid]::SetColumn($passwordLabel, 0); [void]$grid.Children.Add($passwordLabel)
+    $passwordBox = New-Object System.Windows.Controls.PasswordBox; $passwordBox.Height = 25; $passwordBox.Margin = "0,5"; $passwordBox.Name = "PasswordField$($script:serverCount)"
+    [System.Windows.Controls.Grid]::SetRow($passwordBox, 2); [System.Windows.Controls.Grid]::SetColumn($passwordBox, 1); [void]$grid.Children.Add($passwordBox)
     
-    $userTextBox = New-Object System.Windows.Controls.TextBox
-    $userTextBox.Height = 25
-    $userTextBox.Margin = "0,5"
-    $userTextBox.Name = "UserField$($script:serverCount)"
-    [System.Windows.Controls.Grid]::SetRow($userTextBox, 1)
-    [System.Windows.Controls.Grid]::SetColumn($userTextBox, 1)
-    [void]$grid.Children.Add($userTextBox)
-    
-    # Password Field
-    $passwordLabel = New-Object System.Windows.Controls.Label
-    $passwordLabel.Content = "Password:"
-    $passwordLabel.VerticalAlignment = "Center"
-    $passwordLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($passwordLabel, 2)
-    [System.Windows.Controls.Grid]::SetColumn($passwordLabel, 0)
-    [void]$grid.Children.Add($passwordLabel)
-    
-    $passwordBox = New-Object System.Windows.Controls.PasswordBox
-    $passwordBox.Height = 25
-    $passwordBox.Margin = "0,5"
-    $passwordBox.Name = "PasswordField$($script:serverCount)"
-    [System.Windows.Controls.Grid]::SetRow($passwordBox, 2)
-    [System.Windows.Controls.Grid]::SetColumn($passwordBox, 1)
-    [void]$grid.Children.Add($passwordBox)
-    
-    # Service Field
-    $serviceLabel = New-Object System.Windows.Controls.Label
-    $serviceLabel.Content = "Service:"
-    $serviceLabel.VerticalAlignment = "Center"
-    $serviceLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3)
-    [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0)
-    [void]$grid.Children.Add($serviceLabel)
-    
-    $serviceComboBox = New-Object System.Windows.Controls.ComboBox
-    $serviceComboBox.Height = 25
-    $serviceComboBox.Margin = "0,5"
-    $serviceComboBox.Name = "ServiceField$($script:serverCount)"
-    
-    # Load all dynamic services
+    # 3. Service
+    $serviceLabel = New-Object System.Windows.Controls.Label; $serviceLabel.Content = "Service:"; $serviceLabel.VerticalAlignment = "Center"; $serviceLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3); [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0); [void]$grid.Children.Add($serviceLabel)
+    $serviceComboBox = New-Object System.Windows.Controls.ComboBox; $serviceComboBox.Height = 25; $serviceComboBox.Margin = "0,5"; $serviceComboBox.Name = "ServiceField$($script:serverCount)"
     $serviceFiles = Get-ChildItem -Path $servicesDir -Filter "*.yml"
     foreach ($file in $serviceFiles) {
-        $item = New-Object System.Windows.Controls.ComboBoxItem
-        $item.Content = $file.BaseName
-        [void]$serviceComboBox.Items.Add($item)
+        $item = New-Object System.Windows.Controls.ComboBoxItem; $item.Content = $file.BaseName; [void]$serviceComboBox.Items.Add($item)
     }
-    
-    [System.Windows.Controls.Grid]::SetRow($serviceComboBox, 3)
-    [System.Windows.Controls.Grid]::SetColumn($serviceComboBox, 1)
-    [void]$grid.Children.Add($serviceComboBox)
+    [System.Windows.Controls.Grid]::SetRow($serviceComboBox, 3); [System.Windows.Controls.Grid]::SetColumn($serviceComboBox, 1); [void]$grid.Children.Add($serviceComboBox)
 
-    # Use Traefik Field
-    $traefikLabel = New-Object System.Windows.Controls.Label
-    $traefikLabel.Content = "Use Traefik:"
-    $traefikLabel.VerticalAlignment = "Center"
-    $traefikLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($traefikLabel, 4)
-    [System.Windows.Controls.Grid]::SetColumn($traefikLabel, 0)
-    [void]$grid.Children.Add($traefikLabel)
+    # 4. Traefik
+    $traefikLabel = New-Object System.Windows.Controls.Label; $traefikLabel.Content = "Use Traefik:"; $traefikLabel.VerticalAlignment = "Center"; $traefikLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($traefikLabel, 4); [System.Windows.Controls.Grid]::SetColumn($traefikLabel, 0); [void]$grid.Children.Add($traefikLabel)
+    $traefikCheckBox = New-Object System.Windows.Controls.CheckBox; $traefikCheckBox.IsChecked = $true; $traefikCheckBox.VerticalAlignment = "Center"; $traefikCheckBox.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($traefikCheckBox, 4); [System.Windows.Controls.Grid]::SetColumn($traefikCheckBox, 1); [void]$grid.Children.Add($traefikCheckBox)
     
-    $traefikCheckBox = New-Object System.Windows.Controls.CheckBox
-    $traefikCheckBox.IsChecked = $true
-    $traefikCheckBox.VerticalAlignment = "Center"
-    $traefikCheckBox.Margin = "0,5"
-    $traefikCheckBox.Name = "UseTraefikField$($script:serverCount)"
-    [System.Windows.Controls.Grid]::SetRow($traefikCheckBox, 4)
-    [System.Windows.Controls.Grid]::SetColumn($traefikCheckBox, 1)
-    [void]$grid.Children.Add($traefikCheckBox)
+    # 5. SSH Config
+    $sshLabel = New-Object System.Windows.Controls.Label; $sshLabel.Content = "SSH Config:"; $sshLabel.VerticalAlignment = "Center"; $sshLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($sshLabel, 5); [System.Windows.Controls.Grid]::SetColumn($sshLabel, 0); [void]$grid.Children.Add($sshLabel)
+    $sshStack = New-Object System.Windows.Controls.StackPanel; $sshStack.Orientation = "Horizontal"
+    $sshCheckBox = New-Object System.Windows.Controls.CheckBox; $sshCheckBox.Content = "Enable"; $sshCheckBox.IsChecked = $true; $sshCheckBox.VerticalAlignment = "Center"; $sshCheckBox.Margin = "0,0,10,0"
+    $sshPortLabel = New-Object System.Windows.Controls.Label; $sshPortLabel.Content = "Port:"; $sshPortLabel.VerticalAlignment = "Center"; $sshPortLabel.Margin = "0,0,5,0"
+    $sshPortBox = New-Object System.Windows.Controls.TextBox; $sshPortBox.Text = "22"; $sshPortBox.Width = 40; $sshPortBox.Height = 25; $sshPortBox.VerticalAlignment = "Center"
+    [void]$sshStack.Children.Add($sshCheckBox); [void]$sshStack.Children.Add($sshPortLabel); [void]$sshStack.Children.Add($sshPortBox)
+    [System.Windows.Controls.Grid]::SetRow($sshStack, 5); [System.Windows.Controls.Grid]::SetColumn($sshStack, 1); [void]$grid.Children.Add($sshStack)
     
-    # Add grid to GroupBox
+    # 6. WinRM Config
+    $winrmLabel = New-Object System.Windows.Controls.Label; $winrmLabel.Content = "WinRM Config:"; $winrmLabel.VerticalAlignment = "Center"; $winrmLabel.Margin = "0,5"
+    [System.Windows.Controls.Grid]::SetRow($winrmLabel, 6); [System.Windows.Controls.Grid]::SetColumn($winrmLabel, 0); [void]$grid.Children.Add($winrmLabel)
+    $winrmStack = New-Object System.Windows.Controls.StackPanel; $winrmStack.Orientation = "Horizontal"
+    $winrmCheckBox = New-Object System.Windows.Controls.CheckBox; $winrmCheckBox.Content = "Enable"; $winrmCheckBox.IsChecked = $true; $winrmCheckBox.VerticalAlignment = "Center"; $winrmCheckBox.Margin = "0,0,10,0"
+    $winrmPortLabel = New-Object System.Windows.Controls.Label; $winrmPortLabel.Content = "Port:"; $winrmPortLabel.VerticalAlignment = "Center"; $winrmPortLabel.Margin = "0,0,5,0"
+    $winrmPortBox = New-Object System.Windows.Controls.TextBox; $winrmPortBox.Text = "5985"; $winrmPortBox.Width = 40; $winrmPortBox.Height = 25; $winrmPortBox.VerticalAlignment = "Center"
+    [void]$winrmStack.Children.Add($winrmCheckBox); [void]$winrmStack.Children.Add($winrmPortLabel); [void]$winrmStack.Children.Add($winrmPortBox)
+    [System.Windows.Controls.Grid]::SetRow($winrmStack, 6); [System.Windows.Controls.Grid]::SetColumn($winrmStack, 1); [void]$grid.Children.Add($winrmStack)
+    
     $groupBox.Content = $grid
-    
-    # Add GroupBox to container
     [void]$serverContainer.Children.Add($groupBox)
     
-    # Store references to controls for later retrieval
-    $serverControlRefs = @{
-        ServerNumber = $script:serverCount
-        IPTextBox = $ipTextBox
-        UserTextBox = $userTextBox
-        PasswordBox = $passwordBox
-        ServiceComboBox = $serviceComboBox
-        UseTraefikCheckBox = $traefikCheckBox
+    $script:serverControls += @{
+        ServerNumber = $script:serverCount; IPTextBox = $ipTextBox; UserTextBox = $userTextBox; PasswordBox = $passwordBox; ServiceComboBox = $serviceComboBox
+        UseTraefikCheckBox = $traefikCheckBox; SSHCheckBox = $sshCheckBox; SSHPortBox = $sshPortBox; WinRMCheckBox = $winrmCheckBox; WinRMPortBox = $winrmPortBox
     }
-    $script:serverControls += $serverControlRefs
 }
 
 # Function to collect all server configurations
 function Get-AllServerConfigs {
     $allConfigs = @()
-    
     foreach ($controls in $script:serverControls) {
-        # Get selected service
-        $selectedService = if ($controls.ServiceComboBox.SelectedItem) {
-            $controls.ServiceComboBox.SelectedItem.Content
-        } else {
-            $null
-        }
+        $sp = if ([string]::IsNullOrWhiteSpace($controls.SSHPortBox.Text)) { 22 } else { [int]$controls.SSHPortBox.Text }
+        $wp = if ([string]::IsNullOrWhiteSpace($controls.WinRMPortBox.Text)) { 5985 } else { [int]$controls.WinRMPortBox.Text }
         
-        # Create configuration object (Cast to PSCustomObject)
         $config = [PSCustomObject]@{
             ServerNumber = $controls.ServerNumber
             IP = $controls.IPTextBox.Text
             User = $controls.UserTextBox.Text
             Password = $controls.PasswordBox.Password
-            Service = $selectedService
+            Service = if ($controls.ServiceComboBox.SelectedItem) { $controls.ServiceComboBox.SelectedItem.Content } else { $null }
             UseTraefik = [bool]$controls.UseTraefikCheckBox.IsChecked
+            EnableSSH = [bool]$controls.SSHCheckBox.IsChecked
+            SSHPort = $sp
+            EnableWinRM = [bool]$controls.WinRMCheckBox.IsChecked
+            WinRMPort = $wp
         }
-        
         $allConfigs += $config
     }
-    
-    # The unary comma prevents PowerShell from unrolling a single-item array
     return ,$allConfigs
 }
 
@@ -380,36 +319,19 @@ function Test-IPAddress {
 # Function to validate all server configurations
 function Test-ServerConfigs {
     param($Configs)
-    
     $validationErrors = @()
-    
     foreach ($config in $Configs) {
         $serverNum = $config.ServerNumber
+        if ([string]::IsNullOrWhiteSpace($config.IP)) { $validationErrors += "Server $($serverNum): IP Address is required" }
+        elseif (-not (Test-IPAddress $config.IP)) { $validationErrors += "Server $($serverNum): Invalid IP Address format" }
+        if ([string]::IsNullOrWhiteSpace($config.User)) { $validationErrors += "Server $($serverNum): Username is required" }
+        if ([string]::IsNullOrWhiteSpace($config.Password)) { $validationErrors += "Server $($serverNum): Password is required" }
+        if ([string]::IsNullOrWhiteSpace($config.Service)) { $validationErrors += "Server $($serverNum): Service selection is required" }
         
-        # Validate IP Address
-        if ([string]::IsNullOrWhiteSpace($config.IP)) {
-            $validationErrors += "Server $($serverNum): IP Address is required"
-        }
-        elseif (-not (Test-IPAddress $config.IP)) {
-            $validationErrors += "Server $($serverNum): Invalid IP Address format"
-        }
-        
-        # Validate Username
-        if ([string]::IsNullOrWhiteSpace($config.User)) {
-            $validationErrors += "Server $($serverNum): Username is required"
-        }
-        
-        # Validate Password
-        if ([string]::IsNullOrWhiteSpace($config.Password)) {
-            $validationErrors += "Server $($serverNum): Password is required"
-        }
-        
-        # Validate Service Selection
-        if ([string]::IsNullOrWhiteSpace($config.Service)) {
-            $validationErrors += "Server $($serverNum): Service selection is required"
-        }
+        if (-not $config.EnableSSH -and -not $config.EnableWinRM) { $validationErrors += "Server $($serverNum): Must enable at least SSH or WinRM" }
+        if ($config.EnableSSH -and ($config.SSHPort -le 0 -or $config.SSHPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid SSH Port" }
+        if ($config.EnableWinRM -and ($config.WinRMPort -le 0 -or $config.WinRMPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid WinRM Port" }
     }
-    
     return $validationErrors
 }
 
@@ -821,8 +743,8 @@ function Show-HealthMonitorWindow {
                 $btnStart.Add_Click({
                     $data = $this.Tag
                     $statusBarText.Text = "Starting $($data.ContainerName) on $($data.Config.IP)..."
-                    $this.Dispatcher.Invoke([action]{}, "Background") # Force UI refresh
-                    
+                    $this.Dispatcher.Invoke([action]{}, "Background")
+                    Set-ConnectionConfig -SSHPort $data.Config.SSHPort -WinRMPort $data.Config.WinRMPort -EnableSSH $data.Config.EnableSSH -EnableWinRM $data.Config.EnableWinRM
                     $res = Start-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
                     if ($res) { $statusBarText.Text = "Started $($data.ContainerName)." } else { $statusBarText.Text = "Failed to start $($data.ContainerName)." }
                     Refresh-HealthData
@@ -838,11 +760,11 @@ function Show-HealthMonitorWindow {
                 $btnStop.Tag = $tagData
                 $btnStop.Add_Click({
                     $data = $this.Tag
-                    $statusBarText.Text = "Stopping $($data.ContainerName) on $($data.Config.IP)..."
+                    $statusBarText.Text = "Starting $($data.ContainerName) on $($data.Config.IP)..."
                     $this.Dispatcher.Invoke([action]{}, "Background")
-                    
-                    $res = Stop-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
-                    if ($res) { $statusBarText.Text = "Stopped $($data.ContainerName)." } else { $statusBarText.Text = "Failed to stop $($data.ContainerName)." }
+                    Set-ConnectionConfig -SSHPort $data.Config.SSHPort -WinRMPort $data.Config.WinRMPort -EnableSSH $data.Config.EnableSSH -EnableWinRM $data.Config.EnableWinRM
+                    $res = Start-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
+                    if ($res) { $statusBarText.Text = "Started $($data.ContainerName)." } else { $statusBarText.Text = "Failed to start $($data.ContainerName)." }
                     Refresh-HealthData
                 })
 
@@ -855,11 +777,11 @@ function Show-HealthMonitorWindow {
                 $btnRestart.Tag = $tagData
                 $btnRestart.Add_Click({
                     $data = $this.Tag
-                    $statusBarText.Text = "Restarting $($data.ContainerName) on $($data.Config.IP)..."
+                    $statusBarText.Text = "Starting $($data.ContainerName) on $($data.Config.IP)..."
                     $this.Dispatcher.Invoke([action]{}, "Background")
-                    
-                    $res = Restart-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
-                    if ($res) { $statusBarText.Text = "Restarted $($data.ContainerName)." } else { $statusBarText.Text = "Failed to restart $($data.ContainerName)." }
+                    Set-ConnectionConfig -SSHPort $data.Config.SSHPort -WinRMPort $data.Config.WinRMPort -EnableSSH $data.Config.EnableSSH -EnableWinRM $data.Config.EnableWinRM
+                    $res = Start-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
+                    if ($res) { $statusBarText.Text = "Started $($data.ContainerName)." } else { $statusBarText.Text = "Failed to start $($data.ContainerName)." }
                     Refresh-HealthData
                 })
 
@@ -935,6 +857,7 @@ function Show-HealthMonitorWindow {
             param($Config, $OutputQueue, $ModulesPath)
             
             Import-Module "$ModulesPath\RMSetup.psm1" -Force -ErrorAction SilentlyContinue
+            Set-ConnectionConfig -SSHPort $Config.SSHPort -WinRMPort $Config.WinRMPort -EnableSSH $Config.EnableSSH -EnableWinRM $Config.EnableWinRM
             
             $serverHealth = $null
             $containerHealth = $null
@@ -1199,6 +1122,7 @@ function Show-HealthMonitorWindow {
             
             # Use consolidated RMSetup module
             Import-Module "$ModulesPath\RMSetup.psm1" -Force -ErrorAction SilentlyContinue
+            Set-ConnectionConfig -SSHPort $Config.SSHPort -WinRMPort $Config.WinRMPort -EnableSSH $Config.EnableSSH -EnableWinRM $Config.EnableWinRM
             
             try {
                 $fullReport = Get-FullHealthReport -IP $Config.IP -User $Config.User -Password $Config.Password
@@ -1330,6 +1254,7 @@ function Show-HealthMonitorWindow {
                 
                 # Use consolidated RMSetup module
                 Import-Module "$ModulesPath\RMSetup.psm1" -Force -ErrorAction SilentlyContinue
+                Set-ConnectionConfig -SSHPort $Config.SSHPort -WinRMPort $Config.WinRMPort -EnableSSH $Config.EnableSSH -EnableWinRM $Config.EnableWinRM
                 
                 try {
                     $fullReport = Get-FullHealthReport -IP $Config.IP -User $Config.User -Password $Config.Password
@@ -1809,6 +1734,7 @@ $runSetupButton.Add_Click({
         # Import the consolidated RMSetup module in the runspace
         # This module contains all functionality: Logging, Remote Connection, Health Monitoring, Service Installation, WSL2 Setup
         Import-Module "$ModulesPath\RMSetup.psm1" -Force
+        Set-ConnectionConfig -SSHPort $Config.SSHPort -WinRMPort $Config.WinRMPort -EnableSSH $Config.EnableSSH -EnableWinRM $Config.EnableWinRM
         
         $serverNum = $Config.ServerNumber
         Send-Output -Message "[Server $serverNum] Starting deployment to $($Config.IP)..." -Color "Cyan" -ServerNum $serverNum
