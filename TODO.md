@@ -16,7 +16,7 @@
 14. ## Speed up monitoring(done-reduced to 30s)
 15. ## Remove putty(needed to function)
 16. ## Remove Choco(done)
-17. ## Fix the testing
+17. ## Fix the testing(done)
 18. ## Document code thurougly
 19. ## Fix WSL2 install
 20. ## change/overhall code structure (code is all over the place)(done)
