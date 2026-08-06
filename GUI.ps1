@@ -57,11 +57,6 @@ services:
 # ---------------------------------------
 
 # Load the consolidated RMSetup module (contains all functionality)
-# - Logging functions
-# - Remote connection functions (SSH, WinRM, WSL)
-# - Health monitoring functions
-# - Service installation functions (Docker, Traefik, Portainer, AdGuard, N8N, Crafty, Heimdall)
-# - WSL2 setup functions for Windows
 Import-Module (Join-Path $scriptRoot "modules\RMSetup.psm1") -Force -Scope Global
 
 # Initialize logging
@@ -132,7 +127,20 @@ $script:serverCount = 0
 $script:serverControls = @()  # Store references to all server controls
 $script:terminalMode = "Simple"  # Default terminal mode: Simple or Advanced
 
-# Function to write colored output to the terminal
+<#
+.SYNOPSIS
+    Writes colored, formatted text to the WPF terminal output area.
+.DESCRIPTION
+    Because background runspaces cannot directly modify WPF UI elements (cross-thread violation), 
+    this function uses `$script:terminalOutput.Dispatcher.Invoke` to safely push text updates 
+    to the main UI thread. It also handles timestamp prefixes when in 'Advanced' mode.
+.PARAMETER Message
+    The string message to display in the terminal.
+.PARAMETER Color
+    The brush color for the text (e.g., "Green", "Red", "Cyan"). Defaults to "White".
+.OUTPUTS
+    None. Modifies the UI directly.
+#>
 function Write-TerminalOutput {
     param(
         [string]$Message,
@@ -162,14 +170,23 @@ function Write-TerminalOutput {
             "Gray" { $run.Foreground = [System.Windows.Media.Brushes]::Gray }
             default { $run.Foreground = [System.Windows.Media.Brushes]::White }
         }
-    
+        
         $paragraph.Inlines.Add($run)
         $script:terminalOutput.Document.Blocks.Add($paragraph)
         $script:terminalOutput.ScrollToEnd()
     }, "Normal")
 }
 
-# Function to create a new server box
+<#
+.SYNOPSIS
+    Dynamically generates and adds a new server configuration group to the UI.
+.DESCRIPTION
+    Instead of hardcoding a fixed number of server inputs, this function programmatically builds 
+    WPF elements (TextBoxes, ComboBoxes, CheckBoxes) and appends them to the main StackPanel. 
+    It stores object references in `$script:serverControls` so their values can be retrieved later.
+.OUTPUTS
+    None. Appends XAML elements to the UI.
+#>
 function Add-ServerBox {
     $script:serverCount++
     $groupBox = New-Object System.Windows.Controls.GroupBox
@@ -254,7 +271,16 @@ function Add-ServerBox {
     }
 }
 
-# Function to collect all server configurations
+<#
+.SYNOPSIS
+    Gathers the user inputs from all dynamically created Server UI blocks.
+.DESCRIPTION
+    Iterates through the UI control references and maps them into an array of PSCustomObjects. 
+    It uses the unary comma (,$allConfigs) in the return statement to explicitly prevent 
+    PowerShell from automatically "unrolling" single-item arrays.
+.OUTPUTS
+    Array of PSCustomObjects containing the IP, Credentials, and Configuration for each server.
+#>
 function Get-AllServerConfigs {
     $allConfigs = @()
     foreach ($controls in $script:serverControls) {
@@ -278,7 +304,17 @@ function Get-AllServerConfigs {
     return ,$allConfigs
 }
 
-# Function to validate IP address format
+<#
+.SYNOPSIS
+    Validates if a string is a properly formatted IPv4 address or Hostname.
+.DESCRIPTION
+    Runs early validation to ensure malformed IPs are caught before background threads 
+    attempt to initiate connections, which would otherwise result in long TCP timeout waits.
+.PARAMETER IP
+    The IP string or Hostname to validate.
+.OUTPUTS
+    Boolean ($true if valid, $false if invalid).
+#>
 function Test-IPAddress {
     param([string]$IP)
     
@@ -316,7 +352,18 @@ function Test-IPAddress {
     return $false
 }
 
-# Function to validate all server configurations
+<#
+.SYNOPSIS
+    Validates the array of server configurations for empty fields and logic errors.
+.DESCRIPTION
+    Iterates through the collected form data to enforce business logic: ensures usernames, IPs, 
+    and passwords exist, verifies that at least one remote connection protocol is enabled, and 
+    checks that custom ports are within the 1-65535 valid TCP range.
+.PARAMETER Configs
+    The array of PSCustomObjects returned by Get-AllServerConfigs.
+.OUTPUTS
+    An array of string error messages. If empty, validation passed.
+#>
 function Test-ServerConfigs {
     param($Configs)
     $validationErrors = @()
@@ -348,7 +395,14 @@ $simpleTerminalButton = $window.FindName("SimpleTerminalButton")
 $advancedTerminalButton = $window.FindName("AdvancedTerminalButton")
 $script:terminalOutput = $window.FindName("TerminalOutput")
 
-# Function to update terminal mode button styles
+<#
+.SYNOPSIS
+    Visually updates the Simple and Advanced terminal mode toggle buttons.
+.DESCRIPTION
+    Swaps background and foreground colors to indicate which terminal verbosity mode is active.
+.OUTPUTS
+    None. Modifies the UI.
+#>
 function Update-TerminalModeButtons {
     $brushConverter = New-Object System.Windows.Media.BrushConverter
     if ($script:terminalMode -eq "Simple") {
@@ -367,7 +421,18 @@ function Update-TerminalModeButtons {
 # Initialize button styles
 Update-TerminalModeButtons
 
-# Function to show the Health Monitoring Window
+<#
+.SYNOPSIS
+    Creates and manages the dedicated Health Monitor UI window.
+.DESCRIPTION
+    Because health polling is slow, this window spins up parallel runspaces to poll servers via SSH/WinRM 
+    in the background. It uses a DispatcherTimer to sweep an output queue and update the UI securely, 
+    preventing the WPF application from freezing during network waits.
+.PARAMETER ServerConfigs
+    Array of validated server configurations to monitor.
+.OUTPUTS
+    None. Renders an interactive modal window.
+#>
 function Show-HealthMonitorWindow {
     param($ServerConfigs)
     
@@ -474,7 +539,12 @@ function Show-HealthMonitorWindow {
     $script:autoRefreshTimer = $null
     $script:lastHealthData = @{}
     
-    # Function to write to report output
+    <#
+    .SYNOPSIS
+        Thread-safely writes to the generated Health Report RichTextBox.
+    .DESCRIPTION
+        Uses WPF Dispatcher to push formatted string chunks from the background report builder.
+    #>
     function Write-ReportOutput {
         param([string]$Message, [string]$Color = "White")
         
@@ -497,7 +567,13 @@ function Show-HealthMonitorWindow {
         }, "Normal")
     }
     
-    # Function to create a server health card
+    <#
+    .SYNOPSIS
+        Builds a WPF UI Border card containing server metrics (CPU, RAM, Disk).
+    .DESCRIPTION
+        Constructs the visual component dynamically for each server, using color-coded 
+        backgrounds corresponding to the health severity.
+    #>
     function New-ServerHealthCard {
         param($ServerConfig, $HealthData)
         
@@ -616,7 +692,14 @@ function Show-HealthMonitorWindow {
         return $border
     }
     
-    # Function to create a container health card
+    <#
+    .SYNOPSIS
+        Builds a WPF UI Border card displaying Docker containers with interactive controls.
+    .DESCRIPTION
+        Generates action buttons (Start/Stop/Restart) for every container. The buttons store the server's 
+        connection credentials in their `.Tag` property so they can securely reach out via SSH/WinRM 
+        when clicked without cross-contamination.
+    #>
     function New-ContainerHealthCard {
         param($ServerConfig, $ContainerData)
         
@@ -731,7 +814,6 @@ function Show-HealthMonitorWindow {
                 [System.Windows.Controls.Grid]::SetColumn($actionPanel, 3)
                 
                 $tagData = @{ Config = $ServerConfig; ContainerName = $container.Name }
-
                 $btnStart = New-Object System.Windows.Controls.Button
                 $btnStart.Content = "▶"
                 $btnStart.ToolTip = "Start Container"
@@ -812,7 +894,13 @@ function Show-HealthMonitorWindow {
     $script:healthRefreshInProgress = $false
     $script:healthRefreshTimer = $null
     
-    # Function to refresh health data asynchronously
+    <#
+    .SYNOPSIS
+        Initiates parallel background jobs to fetch server metrics.
+    .DESCRIPTION
+        Executes a concurrent RunspacePool to prevent the WPF UI from hanging while waiting 
+        for SSH/WinRM responses. A timer polls the `$script:healthDataQueue` to render new cards.
+    #>
     function Refresh-HealthData {
         if ($script:healthRefreshInProgress) {
             $statusBarText.Text = "Refresh already in progress..."
@@ -1305,7 +1393,7 @@ function Show-HealthMonitorWindow {
                 while ($script:exportQueue.TryDequeue([ref]$item)) {
                     if ($item.Type -eq "ExportData") {
                         $script:exportContent += $item.Report
-                        $script:exportContent += ""
+                        $script:exportContent += "`n"
                     }
                 }
                 
@@ -1371,6 +1459,15 @@ function Show-HealthMonitorWindow {
     $healthWindow.ShowDialog() | Out-Null
 }
 
+<#
+.SYNOPSIS
+    Pops up a window for users to manage Docker Compose YAML files.
+.DESCRIPTION
+    Instead of hardcoding files or making the user edit text manually, this allows on-the-fly 
+    creation, editing, and deletion of service configurations from the local directory.
+.OUTPUTS
+    None. Displays an interactive WPF sub-window.
+#>
 function Show-ManageServicesWindow {
     [xml]$manageXaml = @"
 <Window 
@@ -1407,6 +1504,10 @@ function Show-ManageServicesWindow {
     $editor = $manageWindow.FindName("ComposeEditor")
     $saveButton = $manageWindow.FindName("SaveServiceButton")
     
+    <#
+    .SYNOPSIS
+        Populates the ListBox with available .yml files.
+    #>
     function Load-ServiceList {
         $serviceList.Items.Clear()
         Get-ChildItem -Path $servicesDir -Filter "*.yml" | ForEach-Object {
@@ -1629,7 +1730,6 @@ $runSetupButton.Add_Click({
         }
         
         # Helper function to capture and forward Write-Host output from module functions
-        # This function captures the Information stream (Write-Host output) and Error stream
         function Invoke-WithOutput {
             param(
                 [scriptblock]$ScriptBlock,
@@ -1639,9 +1739,6 @@ $runSetupButton.Add_Click({
             # Use a StringWriter to capture console output
             $previousHost = $Host
             $infoRecords = @()
-            
-            # Execute with information capture using -InformationVariable
-            # We'll use a wrapper that captures Write-Host via 6>&1
             $capturedOutput = $null
             $errorOutput = $null
             
@@ -1663,7 +1760,6 @@ $runSetupButton.Add_Click({
                     $message = $null
                     $messageColor = "Gray"
                     
-                    # Handle different output types
                     if ($item -is [System.Management.Automation.InformationRecord]) {
                         $message = $item.MessageData.ToString()
                         # Try to get foreground color from InformationRecord
@@ -1798,7 +1894,7 @@ $runSetupButton.Add_Click({
             $composeContent = Get-Content $composePath -Raw
             
             Invoke-WithOutput -ScriptBlock {
-                $script:serviceSuccess = Deploy-DockerService -IP $Config.IP -User $Config.User -Password $Config.Password -ServiceName $Config.Service -ComposeContent $composeContent
+                $script:serviceSuccess = Deploy-DockerService -IP $Config.IP -User $Config.User -Password $Config.Password -ServiceName $Config.Service -ComposeContent $composeContent -OSType $osType
             } -ServerNum $serverNum
             
             $serviceSuccess = $script:serviceSuccess
@@ -1814,11 +1910,10 @@ $runSetupButton.Add_Click({
         elseif ($osType -eq "Windows") {
             Send-Output -Message "[Server $serverNum] Docker is ready in WSL2" -Color "Green" -ServerNum $serverNum
             
-            # Install Traefik
             if ($Config.UseTraefik) {
                 Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy in WSL2..." -Color "Cyan" -ServerNum $serverNum
                 Invoke-WithOutput -ScriptBlock {
-                    $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+                    $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
                 } -ServerNum $serverNum
                 $traefikSuccess = $script:traefikSuccess
                 
@@ -1832,7 +1927,6 @@ $runSetupButton.Add_Click({
                 Send-Output -Message "[Server $serverNum] Traefik installation skipped (Disabled in config)" -Color "Gray" -ServerNum $serverNum
             }
             
-            # Deploy the selected service in wsl2
             Send-Output -Message "[Server $serverNum] Deploying service: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
             
             $composeFileName = "$($Config.Service).yml"
@@ -1846,7 +1940,7 @@ $runSetupButton.Add_Click({
             $composeContent = Get-Content $composePath -Raw
             
             Invoke-WithOutput -ScriptBlock {
-                $script:serviceSuccess = Deploy-DockerService -IP $Config.IP -User $Config.User -Password $Config.Password -ServiceName $Config.Service -ComposeContent $composeContent
+                $script:serviceSuccess = Deploy-DockerService -IP $Config.IP -User $Config.User -Password $Config.Password -ServiceName $Config.Service -ComposeContent $composeContent -OSType $osType
             } -ServerNum $serverNum
             
             $serviceSuccess = $script:serviceSuccess
@@ -1919,7 +2013,6 @@ $runSetupButton.Add_Click({
             $global:deploymentTimer.Stop()
             
             # LOCK THE RUNSPACES AND CLEAR GLOBAL
-            # This ensures any already-queued ticks in the WPF dispatcher do nothing
             $runspacesToProcess = $global:deploymentRunspaces
             $global:deploymentRunspaces = @()
             
@@ -1985,6 +2078,3 @@ $runSetupButton.Add_Click({
 
 #Show the Window
 $window.ShowDialog() | Out-Null
-
-# How much wood could a woodchuck chuck if a woodchuck could chuck wood?
-# It would chuck nonstop
