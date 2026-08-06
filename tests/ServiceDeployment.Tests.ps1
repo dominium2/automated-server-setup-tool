@@ -13,8 +13,17 @@ Describe "Service Deployment Algorithms" {
     
     Context "Deploy-DockerService Volume Parsing" {
         It "Should parse directories but ignore explicit files during mkdir" {
-            # Provide a fake "running" status so the script thinks the deployment succeeded
-            Mock Invoke-RemoteCommand { return "running" } -ModuleName RMSetup
+            # Mock Start-Sleep to instantly skip the 5-second waiting period
+            Mock Start-Sleep { } -ModuleName RMSetup
+
+            # Use a script-scoped variable to safely capture the command across the mock boundary
+            $script:CapturedCommand = ""
+            Mock Invoke-RemoteCommand { 
+                if ($Command -match "mkdir -p") {
+                    $script:CapturedCommand = $Command
+                }
+                return "running" 
+            } -ModuleName RMSetup
             
             $composeWithFiles = @"
 services:
@@ -29,18 +38,24 @@ services:
             
             Deploy-DockerService -IP "10.0.0.1" -User "test" -Password "pass" -ServiceName "testapp" -ComposeContent $composeWithFiles -OSType "Linux" | Out-Null
             
-            # Assert that mkdir string contains directories but strictly ignores files
-            Assert-MockCalled Invoke-RemoteCommand -ParameterFilter { 
-                $Command -match "mkdir -p" -and 
-                $Command -match "/config" -and 
-                $Command -match "/storage" -and 
-                $Command -notmatch "data.json" -and 
-                $Command -notmatch "custom.yml" 
-            } -ModuleName RMSetup
+            # Perform asserts directly on the captured string rather than relying on Pester's ParameterFilter
+            $script:CapturedCommand | Should -Match "mkdir -p"
+            $script:CapturedCommand | Should -Match "/config"
+            $script:CapturedCommand | Should -Match "/storage"
+            $script:CapturedCommand | Should -Not -Match "data.json"
+            $script:CapturedCommand | Should -Not -Match "custom.yml"
         }
         
         It "Should automatically inject the systemd-resolved fix if Port 53 is detected" {
-            Mock Invoke-RemoteCommand { return "running" } -ModuleName RMSetup
+            Mock Start-Sleep { } -ModuleName RMSetup
+            
+            $script:DnsFixCommand = ""
+            Mock Invoke-RemoteCommand { 
+                if ($Command -match "systemd-resolved") {
+                    $script:DnsFixCommand = $Command
+                }
+                return "running" 
+            } -ModuleName RMSetup
             
             $composeDNS = @"
 services:
@@ -50,10 +65,8 @@ services:
 "@
             Deploy-DockerService -IP "10.0.0.1" -User "test" -Password "pass" -ServiceName "dnsapp" -ComposeContent $composeDNS -OSType "Linux" | Out-Null
             
-            Assert-MockCalled Invoke-RemoteCommand -ParameterFilter {
-                $Command -match "systemd-resolved" -and
-                $Command -match "DNSStubListener=no"
-            } -ModuleName RMSetup
+            $script:DnsFixCommand | Should -Match "systemd-resolved"
+            $script:DnsFixCommand | Should -Match "DNSStubListener=no"
         }
     }
 }
