@@ -1024,6 +1024,6 @@ Export-ModuleMember -Function @(
     'Get-TargetOS', 'Test-SSHConnection', 'Test-WinRMConnection', 'Test-RemoteConnection', 'Invoke-WSLCommand', 'Invoke-RemoteCommand',
     'Get-ServerHealth', 'Get-LinuxServerHealth', 'Get-WindowsServerHealth', 'Get-ContainerHealth', 'Get-ContainerLogs', 'Restart-Container', 'Stop-Container', 'Start-Container', 'Get-FullHealthReport', 'Format-HealthReport', 'Test-ServiceHealth', 'Test-CommonServices',
     'Install-Docker', 'Install-Traefik', 'Deploy-DockerService',
-    'Test-WSLReady', 'Install-WSL2', 'Invoke-WSL2Reboot'
+    'Test-WSLReady', 'Install-WSL2', 'Invoke-WSL2Reboot', 'Set-ConnectionConfig'
 )
 #endregion
