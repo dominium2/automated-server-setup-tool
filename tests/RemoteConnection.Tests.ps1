@@ -1,94 +1,65 @@
-# Test script for remote connections to VMs
-# This script tests the RemoteConnection module with both Linux and Windows VMs
+# ==============================================================================
+# RemoteConnection.Tests.ps1
+# Pester tests for OS detection and connection routing
+# ==============================================================================
 
-# Import the RemoteConnection module
-$modulePath = Join-Path $PSScriptRoot "..\modules\RemoteConnection.psm1"
-Import-Module $modulePath -Force
-
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "Remote Connection Test Script" -ForegroundColor Cyan
-Write-Host "========================================`n" -ForegroundColor Cyan
-
-# Define test machines
-$testMachines = @(
-    @{
-        Name = "Linux Server 1"
-        IP = "192.168.56.11"
-        User = "testuser"
-        Password = "testpass123"
-        ExpectedOS = "Linux"
-    },
-    @{
-        Name = "Linux Server 2"
-        IP = "192.168.56.12"
-        User = "testuser"
-        Password = "testpass123"
-        ExpectedOS = "Linux"
-    },
-    @{
-        Name = "Windows Server 1"
-        IP = "192.168.56.21"
-        User = "testuser"
-        Password = "testpass123"
-        ExpectedOS = "Windows"
-    },
-    @{
-        Name = "Windows Server 2"
-        IP = "192.168.56.22"
-        User = "testuser"
-        Password = "testpass123"
-        ExpectedOS = "Windows"
-    }
-)
-
-# Test results tracking
-$results = @()
-
-# Test each machine
-foreach ($machine in $testMachines) {
-    Write-Host "`n========================================" -ForegroundColor Yellow
-    Write-Host "Testing: $($machine.Name)" -ForegroundColor Yellow
-    Write-Host "IP: $($machine.IP)" -ForegroundColor Yellow
-    Write-Host "Expected OS: $($machine.ExpectedOS)" -ForegroundColor Yellow
-    Write-Host "========================================`n" -ForegroundColor Yellow
-    
-    # Test the remote connection
-    $success = Test-RemoteConnection -IP $machine.IP -User $machine.User -Password $machine.Password
-    
-    # Store result
-    $results += [PSCustomObject]@{
-        Name = $machine.Name
-        IP = $machine.IP
-        ExpectedOS = $machine.ExpectedOS
-        Success = $success
-    }
-    
-    # Add a separator
-    Write-Host "`n" -NoNewline
-    Start-Sleep -Seconds 2
+BeforeAll {
+    $modulePath = Join-Path $PSScriptRoot "..\modules\RMSetup.psm1"
+    Import-Module $modulePath -Force
+    Initialize-Logging -LogLevel "Debug" -LogToFile $false -LogToConsole $false | Out-Null
 }
 
-# Display summary
-Write-Host "`n========================================" -ForegroundColor Cyan
-Write-Host "TEST SUMMARY" -ForegroundColor Cyan
-Write-Host "========================================`n" -ForegroundColor Cyan
+Describe "Connection Configuration & OS Detection" {
+    Context "Set-ConnectionConfig" {
+        It "Should correctly update script-scoped port variables" {
+            # Call the exported function from the outside
+            Set-ConnectionConfig -SSHPort 2222 -WinRMPort 5986 -EnableSSH $true -EnableWinRM $false
+            
+            # Step INSIDE the module to verify its private variables updated
+            InModuleScope "RMSetup" {
+                $script:SSHPort | Should -Be 2222
+                $script:WinRMPort | Should -Be 5986
+                $script:EnableSSH | Should -Be $true
+                $script:EnableWinRM | Should -Be $false
+            }
+            
+            # Reset to defaults for the next tests
+            Set-ConnectionConfig -SSHPort 22 -WinRMPort 5985 -EnableSSH $true -EnableWinRM $true
+        }
+    }
 
-$results | ForEach-Object {
-    $color = if ($_.Success) { "Green" } else { "Red" }
-    $status = if ($_.Success) { "SUCCESS" } else { "FAILED" }
-    
-    Write-Host "$($_.Name) ($($_.IP)) - $($_.ExpectedOS): " -NoNewline
-    Write-Host $status -ForegroundColor $color
+    Context "Get-TargetOS Logic" {
+        It "Should return 'Windows' when WinRM port is open" {
+            InModuleScope "RMSetup" {
+                # Mocking inside the module scope ensures 100% interception
+                Mock Test-NetConnection { return [PSCustomObject]@{ TcpTestSucceeded = ($Port -eq 5985) } }
+                Mock Test-Connection { return $null }
+                
+                $os = Get-TargetOS -IP "192.168.1.100"
+                $os | Should -Be "Windows"
+                
+                Assert-MockCalled Test-NetConnection -Times 1 -ParameterFilter { $Port -eq 5985 }
+            }
+        }
+
+        It "Should return 'Linux' when WinRM is closed but SSH is open" {
+            InModuleScope "RMSetup" {
+                Mock Test-NetConnection { return [PSCustomObject]@{ TcpTestSucceeded = ($Port -eq 22) } }
+                Mock Test-Connection { return $null }
+                
+                $os = Get-TargetOS -IP "192.168.1.100"
+                $os | Should -Be "Linux"
+            }
+        }
+        
+        It "Should return `$null if standard ports are closed and Ping fallback fails" {
+            InModuleScope "RMSetup" {
+                Mock Test-NetConnection { return [PSCustomObject]@{ TcpTestSucceeded = $false } }
+                Mock Test-Connection { return $null }
+                
+                $os = Get-TargetOS -IP "192.168.1.200"
+                $os | Should -BeNullOrEmpty
+            }
+        }
+    }
 }
-
-# Calculate success rate
-$successCount = ($results | Where-Object { $_.Success }).Count
-$totalCount = $results.Count
-$successRate = [math]::Round(($successCount / $totalCount) * 100, 2)
-
-Write-Host "`nTotal Tests: $totalCount" -ForegroundColor Cyan
-Write-Host "Successful: $successCount" -ForegroundColor Green
-Write-Host "Failed: $($totalCount - $successCount)" -ForegroundColor Red
-Write-Host "Success Rate: $successRate%" -ForegroundColor $(if ($successRate -eq 100) { "Green" } else { "Yellow" })
-
-Write-Host "`n========================================`n" -ForegroundColor Cyan
