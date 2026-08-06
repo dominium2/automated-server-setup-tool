@@ -1,237 +1,85 @@
 # Automated Home Lab Setup Tool
 
-A PowerShell-based automation tool with GUI for deploying and managing services across multiple servers simultaneously. Simplify your home lab setup with automatic OS detection, Docker deployment, and Traefik reverse proxy configuration.
+A PowerShell-based automation tool with GUI for deploying and managing services across multiple servers simultaneously. Simplify your home lab setup with automatic OS detection, Docker deployment, Traefik reverse proxy configuration, and interactive container management.
 
 ## Overview
 
-This tool eliminates the repetitive and time-consuming process of setting up services across multiple servers. Through an intuitive WPF interface, you can configure multiple servers and deploy services like AdGuard, N8N, Heimdall, Crafty, and Portainer with just a few clicks. The tool handles everything from OS detection to Docker installation, service deployment, and health monitoring—all in parallel.
+This tool eliminates the repetitive and time-consuming process of setting up services across multiple servers. Through an intuitive WPF interface, you can configure multiple servers and deploy services like AdGuard, N8N, Heimdall, Crafty, and Portainer with just a few clicks. 
+
+The backend has been heavily optimized with command batching and OS-detection caching, reducing deployment and monitoring times from minutes down to seconds.
 
 ## Key Features
 
-- **🖥️ Intuitive GUI**: WPF-based interface with tabbed server management
-- **🚀 Parallel Execution**: Deploy to multiple servers simultaneously
-- **🔍 Automatic OS Detection**: Supports Debian-based Linux and Windows 11
-- **🐳 Docker Automation**: Automatic Docker/WSL2 installation and configuration
-- **🔀 Traefik Integration**: Automatic reverse proxy setup with port conflict prevention
-- **💚 Health Monitoring**: Real-time server and container health checks
-- **📝 Comprehensive Logging**: Per-server logging with exportable error reports
-- **🛡️ Robust Error Handling**: Failures on one server don't affect others
-- **🔧 Modular Architecture**: Easy to extend with new services and OS support
+- **Intuitive GUI**: WPF-based interface with tabbed server management.
+- **Parallel Execution**: Deploy to multiple servers simultaneously.
+- **Ultra-Fast Operations**: SSH command batching reduces setup times to ~30 seconds and health monitoring to under 5 seconds.
+- **Custom Connection Configurations**: Define custom SSH and WinRM ports per server directly in the GUI.
+- **Automatic OS Detection**: Supports Debian-based Linux and Windows 11, with smart caching to eliminate redundant network probes.
+- **Interactive Health Monitoring**: Real-time server metrics and actionable container cards (Start, Stop, Restart directly from the UI).
+- **Docker Automation**: Automatic Docker/WSL2 installation and configuration.
+- **Traefik Integration**: Automatic reverse proxy setup with port conflict prevention.
+- **Comprehensive Logging**: Per-server logging with exportable error reports and auto-rotation.
 
 ## Supported Services (MVP)
 
-- **AdGuard Home**: Network-wide ad blocking
-- **N8N**: Workflow automation platform
-- **Crafty Controller**: Minecraft server management
-- **Heimdall**: Application dashboard
-- **Portainer**: Docker container management
+- **AdGuard Home**: Network-wide ad blocking (includes automatic systemd-resolved port 53 conflict resolution).
+- **N8N**: Workflow automation platform.
+- **Crafty Controller**: Minecraft server management.
+- **Heimdall**: Application dashboard.
+- **Portainer**: Docker container management.
 
 ## Supported Operating Systems
 
 - Debian-based Linux distributions (Ubuntu, Debian, Linux Mint, etc.)
 - Windows 11 (with WSL2)
 
-> ⚠️ **Windows VM Limitation**: Windows setup will not work on virtual machines because WSL2 cannot be installed in a VM (it requires nested virtualization which is often unavailable or unsupported). WSL1 is not a viable alternative as it does not support Docker.
+*Note: Windows setup will not work on virtual machines because WSL2 cannot be installed in a VM (it requires nested virtualization which is often unavailable or unsupported).*
 
 ## Prerequisites
 
 - PowerShell 5.1 or later
 - Administrator/root privileges on target servers
 - Internet connection on all servers
-- SSH access configured for Linux servers
-- WinRM configured for Windows servers
-- Target servers must allow remote connections
+- Target servers must allow remote connections (SSH for Linux, WinRM for Windows)
+- `plink` (PuTTY) installed on the host machine for password-based SSH automation (`choco install putty -y`)
 
 ## Installation
 
 1. Clone this repository:
-```powershell
-git clone https://github.com/dominium2/automated-server-setup-tool.git
-cd automated-server-setup-tool
-```
+   ```powershell
+   git clone [https://github.com/dominium2/automated-server-setup-tool.git](https://github.com/dominium2/automated-server-setup-tool.git)
+   cd automated-server-setup-tool
+   ```
+2. Run PowerShell as Administrator.
 
-2. Run PowerShell as Administrator
-
-3. Set execution policy if needed:
-```powershell
-Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-```
-
+3. Set execution policy if needed
+   ```powershell
+   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+   ```
 ## Usage
 
-### Quick Start
+1. Launch the tool by running `GUI.ps1`
 
-1. Launch the tool by running GUI.ps1
-
-2. Click **"Add Service"** to create a new server configuration tab
+2. Click "Add Server" to create a new server configuration block.
 
 3. Fill in the server details:
-   - **IP Address**: Server IP or hostname
-   - **Credentials**: Username and password
-   - **Service**: Select from dropdown (AdGuard, N8N, Heimdall, etc.)
+   - **IP Address**: Server IP or hostname.
+   - **Credentials**: Username and password.
+   - **Service**: Select from the dynamically loaded dropdown.
+   - **Connection Ports**: Modify SSH or WinRM ports if your server uses non-standard configurations.
 
-4. Repeat for additional servers (you can deploy multiple services to the same IP)
+4. Click **"Run Setup"** to start the automated parallel deployment.
 
-5. Click **"Run"** to start automated deployment
-
-### Testing with Vagrant
-
-A `Vagrantfile` is included to quickly spin up test virtual machines for development and testing purposes.
-
-#### Prerequisites for Vagrant
-
-- [Vagrant](https://www.vagrantup.com/downloads) installed
-- [VirtualBox](https://www.virtualbox.org/wiki/Downloads) installed
-
-#### Available VMs
-
-| VM Name | OS | IP Address | Memory | CPUs |
-|---------|-----|------------|--------|------|
-| linux1 | Debian 11 (Bullseye) | 192.168.56.11 | 1024 MB | 1 |
-| linux2 | Debian 11 (Bullseye) | 192.168.56.12 | 1024 MB | 1 |
-| windows1 | Windows 11 | 192.168.56.21 | 2048 MB | 2 |
-| windows2 | Windows 11 | 192.168.56.22 | 2048 MB | 2 |
-
-#### Test Credentials
-
-All VMs are provisioned with the following test user:
-- **Username**: `testuser`
-- **Password**: `testpass123`
-
-#### Common Vagrant Commands
-
-```powershell
-# Start all VMs
-vagrant up
-
-# Start a specific VM (e.g., linux1)
-vagrant up linux1
-
-# Check VM status
-vagrant status
-
-# SSH into a Linux VM
-vagrant ssh linux1
-
-# Stop all VMs
-vagrant halt
-
-# Stop a specific VM
-vagrant halt linux1
-
-# Destroy all VMs (removes them completely)
-vagrant destroy
-
-# Destroy a specific VM
-vagrant destroy linux1 -f
-
-# Reprovision a VM (re-run provisioning scripts)
-vagrant provision linux1
-```
-
-> ⚠️ **Note**: Windows VMs are provided for reference but will not work for Docker deployment due to WSL2 limitations in VMs. Use Linux VMs for testing the full deployment workflow.
-
-## How It Works
-
-1. **OS Detection**: Automatically identifies the target OS
-2. **Dependency Installation**: Installs Docker (Linux) or WSL2/Docker Desktop (Windows)
-3. **Service Deployment**: Uses Docker Compose templates for each service
-4. **Traefik Configuration**: Sets up reverse proxy with automatic routing
-5. **Health Checks**: Monitors container and service health
-6. **Logging**: Records all operations and errors per server
+5. Click **"Health Monitor"** at any time to view live resource usage and manage running containers.
 
 ## Architecture
 
 The tool follows a modular design pattern:
 
-- **UI Layer**: WPF-based GUI for user interaction
-- **Logic Layer**: Core automation logic and orchestration
-- **Module Layer**: Reusable PowerShell modules for specific tasks
-- **Service Layer**: Docker Compose templates for each service
-
-This separation ensures maintainability, testability, and extensibility.
-
-## Documentation
-
-Code documentation is available in the `docs/` folder:
-
-- **[GUI.md](docs/GUI.md)** - Documentation for the GUI.ps1 main application
-- **[RMSetup.md](docs/RMSetup.md)** - Documentation for the RMSetup.psm1 module
+- **UI Layer** (GUI.ps1): WPF-based GUI for user interaction, validation, and threaded parallel runspaces.
+- **Module Layer** (RMSetup.psm1): Consolidated backend logic handling remote execution, OS detection, logging, and health polling.
+- **Service Layer** (configs/services/): Docker Compose YAML templates for each service.
 
 ## Testing
-- Input validation
-- OS detection logic
-- Docker installation modules
-- Deployment templates
-- Error handling scenarios
 
-## Roadmap
-
-### MVP (Current Focus)
-- ✅ OS detection (Debian-based, Windows 11)
-- ✅ Docker/WSL2 installation
-- ✅ Service deployment via Docker Compose
-- ✅ Traefik reverse proxy configuration
-- ✅ Health monitoring
-- ✅ Comprehensive logging and error handling
-- ✅ Parallel server setup
-- ✅ Five core services (AdGuard, N8N, Crafty, Heimdall, Portainer)
-
-### Future Enhancements
-- 🔄 Auto-restart failed containers (3 attempts with exponential backoff)
-- 📧 Email/webhook notifications on failures
-- ➕ Additional services (Plex, Nextcloud, and more)
-- 🐧 Red Hat-based Linux support (RHEL, CentOS, Fedora)
-- 🖥️ Windows Server support
-- 🌐 Web-based UI alternative
-
-## Troubleshooting
-
-### Common Issues
-
-**Connection Failures:**
-- Ensure SSH/WinRM is properly configured on target servers
-- Verify firewall rules allow remote connections
-- Check credentials are correct
-
-**Docker Installation Fails:**
-- Verify internet connectivity on target server
-- Check if virtualization is enabled in BIOS
-- Ensure sufficient disk space
-
-**Windows Setup Fails in VM:**
-- WSL2 cannot be installed in a virtual machine as it requires nested virtualization
-- WSL1 does not support Docker, so it cannot be used as an alternative
-- For Windows-based deployments, use a physical machine or a cloud instance with nested virtualization support
-
-**Port Conflicts:**
-- Traefik automatically manages ports, but ensure port 80/443 are available
-- Check for existing services on target ports
-
-## Security Considerations
-
-- Credentials are used only for the duration of deployment
-- Consider using SSH keys instead of passwords where possible
-- Store configuration files securely
-- Review generated Docker Compose files before deployment
-- Use HTTPS with Traefik in production environments
-
-## Contributing
-
-Contributions are welcome! Please follow these steps:
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/new-service`)
-3. Add your changes with appropriate tests
-4. Ensure all tests pass (`Invoke-Pester`)
-5. Submit a Pull Request
-
-## Author
-
-**dominium2**
-
-## Acknowledgments
-
-- Built with PowerShell and WPF
-- Docker and Docker Compose for containerization
-- Traefik for reverse proxy functionality
+See the `TESTING.md` file for instructions on running the mocked Pester unit tests (which execute in milliseconds without VMs) and the live Vagrant integration tests.
