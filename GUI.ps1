@@ -107,11 +107,11 @@ Write-LogInfo -Message "Application started" -Component "GUI"
         <!-- Terminal Output Display -->
         <Border Grid.Row="3" BorderBrush="Gray" BorderThickness="1" Background="#1E1E1E" Margin="0,0,0,5">
             <RichTextBox Name="TerminalOutput" 
-                IsReadOnly="True" 
-                Background="#1E1E1E" 
-                Foreground="White" 
-                FontFamily="Consolas" 
-                FontSize="12"
+                 IsReadOnly="True" 
+                 Background="#1E1E1E" 
+                 Foreground="White" 
+                 FontFamily="Consolas" 
+                 FontSize="12"
                 Padding="5"
                 BorderThickness="0"
                 VerticalScrollBarVisibility="Auto"
@@ -188,86 +188,92 @@ function Write-TerminalOutput {
     None. Appends XAML elements to the UI.
 #>
 function Add-ServerBox {
-    $script:serverCount++
-    $groupBox = New-Object System.Windows.Controls.GroupBox
-    $groupBox.Header = "Server$($script:serverCount)"
-    $groupBox.Padding = "10"
-    $groupBox.Margin = "0,0,0,10"
-    $grid = New-Object System.Windows.Controls.Grid
-    
-    0..6 | ForEach-Object {
-        $rowDef = New-Object System.Windows.Controls.RowDefinition
-        $rowDef.Height = "Auto"
-        [void]$grid.RowDefinitions.Add($rowDef)
-    }
-    
-    $col1 = New-Object System.Windows.Controls.ColumnDefinition
-    $col1.Width = 100
-    $col2 = New-Object System.Windows.Controls.ColumnDefinition
-    $col2.Width = "*"
-    [void]$grid.ColumnDefinitions.Add($col1)
-    [void]$grid.ColumnDefinitions.Add($col2)
-    
-    # 0. IP
-    $ipLabel = New-Object System.Windows.Controls.Label; $ipLabel.Content = "IP Address:"; $ipLabel.VerticalAlignment = "Center"; $ipLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($ipLabel, 0); [System.Windows.Controls.Grid]::SetColumn($ipLabel, 0); [void]$grid.Children.Add($ipLabel)
-    $ipTextBox = New-Object System.Windows.Controls.TextBox; $ipTextBox.Height = 25; $ipTextBox.Margin = "0,5"; $ipTextBox.Name = "IPField$($script:serverCount)"
-    [System.Windows.Controls.Grid]::SetRow($ipTextBox, 0); [System.Windows.Controls.Grid]::SetColumn($ipTextBox, 1); [void]$grid.Children.Add($ipTextBox)
-    
-    # 1. User
-    $userLabel = New-Object System.Windows.Controls.Label; $userLabel.Content = "User:"; $userLabel.VerticalAlignment = "Center"; $userLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($userLabel, 1); [System.Windows.Controls.Grid]::SetColumn($userLabel, 0); [void]$grid.Children.Add($userLabel)
-    $userTextBox = New-Object System.Windows.Controls.TextBox; $userTextBox.Height = 25; $userTextBox.Margin = "0,5"; $userTextBox.Name = "UserField$($script:serverCount)"
-    [System.Windows.Controls.Grid]::SetRow($userTextBox, 1); [System.Windows.Controls.Grid]::SetColumn($userTextBox, 1); [void]$grid.Children.Add($userTextBox)
-    
-    # 2. Password
-    $passwordLabel = New-Object System.Windows.Controls.Label; $passwordLabel.Content = "Password:"; $passwordLabel.VerticalAlignment = "Center"; $passwordLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($passwordLabel, 2); [System.Windows.Controls.Grid]::SetColumn($passwordLabel, 0); [void]$grid.Children.Add($passwordLabel)
-    $passwordBox = New-Object System.Windows.Controls.PasswordBox; $passwordBox.Height = 25; $passwordBox.Margin = "0,5"; $passwordBox.Name = "PasswordField$($script:serverCount)"
-    [System.Windows.Controls.Grid]::SetRow($passwordBox, 2); [System.Windows.Controls.Grid]::SetColumn($passwordBox, 1); [void]$grid.Children.Add($passwordBox)
-    
-    # 3. Service
-    $serviceLabel = New-Object System.Windows.Controls.Label; $serviceLabel.Content = "Service:"; $serviceLabel.VerticalAlignment = "Center"; $serviceLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3); [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0); [void]$grid.Children.Add($serviceLabel)
-    $serviceComboBox = New-Object System.Windows.Controls.ComboBox; $serviceComboBox.Height = 25; $serviceComboBox.Margin = "0,5"; $serviceComboBox.Name = "ServiceField$($script:serverCount)"
-    $serviceFiles = Get-ChildItem -Path $servicesDir -Filter "*.yml"
-    foreach ($file in $serviceFiles) {
-        $item = New-Object System.Windows.Controls.ComboBoxItem; $item.Content = $file.BaseName; [void]$serviceComboBox.Items.Add($item)
-    }
-    [System.Windows.Controls.Grid]::SetRow($serviceComboBox, 3); [System.Windows.Controls.Grid]::SetColumn($serviceComboBox, 1); [void]$grid.Children.Add($serviceComboBox)
-
-    # 4. Traefik
-    $traefikLabel = New-Object System.Windows.Controls.Label; $traefikLabel.Content = "Use Traefik:"; $traefikLabel.VerticalAlignment = "Center"; $traefikLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($traefikLabel, 4); [System.Windows.Controls.Grid]::SetColumn($traefikLabel, 0); [void]$grid.Children.Add($traefikLabel)
-    $traefikCheckBox = New-Object System.Windows.Controls.CheckBox; $traefikCheckBox.IsChecked = $true; $traefikCheckBox.VerticalAlignment = "Center"; $traefikCheckBox.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($traefikCheckBox, 4); [System.Windows.Controls.Grid]::SetColumn($traefikCheckBox, 1); [void]$grid.Children.Add($traefikCheckBox)
-    
-    # 5. SSH Config
-    $sshLabel = New-Object System.Windows.Controls.Label; $sshLabel.Content = "SSH Config:"; $sshLabel.VerticalAlignment = "Center"; $sshLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($sshLabel, 5); [System.Windows.Controls.Grid]::SetColumn($sshLabel, 0); [void]$grid.Children.Add($sshLabel)
-    $sshStack = New-Object System.Windows.Controls.StackPanel; $sshStack.Orientation = "Horizontal"
-    $sshCheckBox = New-Object System.Windows.Controls.CheckBox; $sshCheckBox.Content = "Enable"; $sshCheckBox.IsChecked = $true; $sshCheckBox.VerticalAlignment = "Center"; $sshCheckBox.Margin = "0,0,10,0"
-    $sshPortLabel = New-Object System.Windows.Controls.Label; $sshPortLabel.Content = "Port:"; $sshPortLabel.VerticalAlignment = "Center"; $sshPortLabel.Margin = "0,0,5,0"
-    $sshPortBox = New-Object System.Windows.Controls.TextBox; $sshPortBox.Text = "22"; $sshPortBox.Width = 40; $sshPortBox.Height = 25; $sshPortBox.VerticalAlignment = "Center"
-    [void]$sshStack.Children.Add($sshCheckBox); [void]$sshStack.Children.Add($sshPortLabel); [void]$sshStack.Children.Add($sshPortBox)
-    [System.Windows.Controls.Grid]::SetRow($sshStack, 5); [System.Windows.Controls.Grid]::SetColumn($sshStack, 1); [void]$grid.Children.Add($sshStack)
-    
-    # 6. WinRM Config
-    $winrmLabel = New-Object System.Windows.Controls.Label; $winrmLabel.Content = "WinRM Config:"; $winrmLabel.VerticalAlignment = "Center"; $winrmLabel.Margin = "0,5"
-    [System.Windows.Controls.Grid]::SetRow($winrmLabel, 6); [System.Windows.Controls.Grid]::SetColumn($winrmLabel, 0); [void]$grid.Children.Add($winrmLabel)
-    $winrmStack = New-Object System.Windows.Controls.StackPanel; $winrmStack.Orientation = "Horizontal"
-    $winrmCheckBox = New-Object System.Windows.Controls.CheckBox; $winrmCheckBox.Content = "Enable"; $winrmCheckBox.IsChecked = $true; $winrmCheckBox.VerticalAlignment = "Center"; $winrmCheckBox.Margin = "0,0,10,0"
-    $winrmPortLabel = New-Object System.Windows.Controls.Label; $winrmPortLabel.Content = "Port:"; $winrmPortLabel.VerticalAlignment = "Center"; $winrmPortLabel.Margin = "0,0,5,0"
-    $winrmPortBox = New-Object System.Windows.Controls.TextBox; $winrmPortBox.Text = "5985"; $winrmPortBox.Width = 40; $winrmPortBox.Height = 25; $winrmPortBox.VerticalAlignment = "Center"
-    [void]$winrmStack.Children.Add($winrmCheckBox); [void]$winrmStack.Children.Add($winrmPortLabel); [void]$winrmStack.Children.Add($winrmPortBox)
-    [System.Windows.Controls.Grid]::SetRow($winrmStack, 6); [System.Windows.Controls.Grid]::SetColumn($winrmStack, 1); [void]$grid.Children.Add($winrmStack)
-    
-    $groupBox.Content = $grid
-    [void]$serverContainer.Children.Add($groupBox)
-    
-    $script:serverControls += @{
-        ServerNumber = $script:serverCount; IPTextBox = $ipTextBox; UserTextBox = $userTextBox; PasswordBox = $passwordBox; ServiceComboBox = $serviceComboBox
-        UseTraefikCheckBox = $traefikCheckBox; SSHCheckBox = $sshCheckBox; SSHPortBox = $sshPortBox; WinRMCheckBox = $winrmCheckBox; WinRMPortBox = $winrmPortBox
+    Write-LogDebug -Message "Entering Add-ServerBox to generate new UI block." -Component "GUI"
+    try {
+        $script:serverCount++
+        $groupBox = New-Object System.Windows.Controls.GroupBox
+        $groupBox.Header = "Server$($script:serverCount)"
+        $groupBox.Padding = "10"
+        $groupBox.Margin = "0,0,0,10"
+        $grid = New-Object System.Windows.Controls.Grid
+        
+        0..6 | ForEach-Object {
+            $rowDef = New-Object System.Windows.Controls.RowDefinition
+            $rowDef.Height = "Auto"
+            [void]$grid.RowDefinitions.Add($rowDef)
+        }
+        
+        $col1 = New-Object System.Windows.Controls.ColumnDefinition
+        $col1.Width = 100
+        $col2 = New-Object System.Windows.Controls.ColumnDefinition
+        $col2.Width = "*"
+        [void]$grid.ColumnDefinitions.Add($col1)
+        [void]$grid.ColumnDefinitions.Add($col2)
+        
+        # 0. IP
+        $ipLabel = New-Object System.Windows.Controls.Label; $ipLabel.Content = "IP Address:"; $ipLabel.VerticalAlignment = "Center"; $ipLabel.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($ipLabel, 0); [System.Windows.Controls.Grid]::SetColumn($ipLabel, 0); [void]$grid.Children.Add($ipLabel)
+        $ipTextBox = New-Object System.Windows.Controls.TextBox; $ipTextBox.Height = 25; $ipTextBox.Margin = "0,5"; $ipTextBox.Name = "IPField$($script:serverCount)"
+        [System.Windows.Controls.Grid]::SetRow($ipTextBox, 0); [System.Windows.Controls.Grid]::SetColumn($ipTextBox, 1); [void]$grid.Children.Add($ipTextBox)
+        
+        # 1. User
+        $userLabel = New-Object System.Windows.Controls.Label; $userLabel.Content = "User:"; $userLabel.VerticalAlignment = "Center"; $userLabel.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($userLabel, 1); [System.Windows.Controls.Grid]::SetColumn($userLabel, 0); [void]$grid.Children.Add($userLabel)
+        $userTextBox = New-Object System.Windows.Controls.TextBox; $userTextBox.Height = 25; $userTextBox.Margin = "0,5"; $userTextBox.Name = "UserField$($script:serverCount)"
+        [System.Windows.Controls.Grid]::SetRow($userTextBox, 1); [System.Windows.Controls.Grid]::SetColumn($userTextBox, 1); [void]$grid.Children.Add($userTextBox)
+        
+        # 2. Password
+        $passwordLabel = New-Object System.Windows.Controls.Label; $passwordLabel.Content = "Password:"; $passwordLabel.VerticalAlignment = "Center"; $passwordLabel.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($passwordLabel, 2); [System.Windows.Controls.Grid]::SetColumn($passwordLabel, 0); [void]$grid.Children.Add($passwordLabel)
+        $passwordBox = New-Object System.Windows.Controls.PasswordBox; $passwordBox.Height = 25; $passwordBox.Margin = "0,5"; $passwordBox.Name = "PasswordField$($script:serverCount)"
+        [System.Windows.Controls.Grid]::SetRow($passwordBox, 2); [System.Windows.Controls.Grid]::SetColumn($passwordBox, 1); [void]$grid.Children.Add($passwordBox)
+        
+        # 3. Service
+        $serviceLabel = New-Object System.Windows.Controls.Label; $serviceLabel.Content = "Service:"; $serviceLabel.VerticalAlignment = "Center"; $serviceLabel.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3); [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0); [void]$grid.Children.Add($serviceLabel)
+        $serviceComboBox = New-Object System.Windows.Controls.ComboBox; $serviceComboBox.Height = 25; $serviceComboBox.Margin = "0,5"; $serviceComboBox.Name = "ServiceField$($script:serverCount)"
+        $serviceFiles = Get-ChildItem -Path $servicesDir -Filter "*.yml"
+        foreach ($file in $serviceFiles) {
+            $item = New-Object System.Windows.Controls.ComboBoxItem; $item.Content = $file.BaseName; [void]$serviceComboBox.Items.Add($item)
+        }
+        [System.Windows.Controls.Grid]::SetRow($serviceComboBox, 3); [System.Windows.Controls.Grid]::SetColumn($serviceComboBox, 1); [void]$grid.Children.Add($serviceComboBox)
+        
+        # 4. Traefik
+        $traefikLabel = New-Object System.Windows.Controls.Label; $traefikLabel.Content = "Use Traefik:"; $traefikLabel.VerticalAlignment = "Center"; $traefikLabel.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($traefikLabel, 4); [System.Windows.Controls.Grid]::SetColumn($traefikLabel, 0); [void]$grid.Children.Add($traefikLabel)
+        $traefikCheckBox = New-Object System.Windows.Controls.CheckBox; $traefikCheckBox.IsChecked = $true; $traefikCheckBox.VerticalAlignment = "Center"; $traefikCheckBox.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($traefikCheckBox, 4); [System.Windows.Controls.Grid]::SetColumn($traefikCheckBox, 1); [void]$grid.Children.Add($traefikCheckBox)
+        
+        # 5. SSH Config
+        $sshLabel = New-Object System.Windows.Controls.Label; $sshLabel.Content = "SSH Config:"; $sshLabel.VerticalAlignment = "Center"; $sshLabel.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($sshLabel, 5); [System.Windows.Controls.Grid]::SetColumn($sshLabel, 0); [void]$grid.Children.Add($sshLabel)
+        $sshStack = New-Object System.Windows.Controls.StackPanel; $sshStack.Orientation = "Horizontal"
+        $sshCheckBox = New-Object System.Windows.Controls.CheckBox; $sshCheckBox.Content = "Enable"; $sshCheckBox.IsChecked = $true; $sshCheckBox.VerticalAlignment = "Center"; $sshCheckBox.Margin = "0,0,10,0"
+        $sshPortLabel = New-Object System.Windows.Controls.Label; $sshPortLabel.Content = "Port:"; $sshPortLabel.VerticalAlignment = "Center"; $sshPortLabel.Margin = "0,0,5,0"
+        $sshPortBox = New-Object System.Windows.Controls.TextBox; $sshPortBox.Text = "22"; $sshPortBox.Width = 40; $sshPortBox.Height = 25; $sshPortBox.VerticalAlignment = "Center"
+        [void]$sshStack.Children.Add($sshCheckBox); [void]$sshStack.Children.Add($sshPortLabel); [void]$sshStack.Children.Add($sshPortBox)
+        [System.Windows.Controls.Grid]::SetRow($sshStack, 5); [System.Windows.Controls.Grid]::SetColumn($sshStack, 1); [void]$grid.Children.Add($sshStack)
+        
+        # 6. WinRM Config
+        $winrmLabel = New-Object System.Windows.Controls.Label; $winrmLabel.Content = "WinRM Config:"; $winrmLabel.VerticalAlignment = "Center"; $winrmLabel.Margin = "0,5"
+        [System.Windows.Controls.Grid]::SetRow($winrmLabel, 6); [System.Windows.Controls.Grid]::SetColumn($winrmLabel, 0); [void]$grid.Children.Add($winrmLabel)
+        $winrmStack = New-Object System.Windows.Controls.StackPanel; $winrmStack.Orientation = "Horizontal"
+        $winrmCheckBox = New-Object System.Windows.Controls.CheckBox; $winrmCheckBox.Content = "Enable"; $winrmCheckBox.IsChecked = $true; $winrmCheckBox.VerticalAlignment = "Center"; $winrmCheckBox.Margin = "0,0,10,0"
+        $winrmPortLabel = New-Object System.Windows.Controls.Label; $winrmPortLabel.Content = "Port:"; $winrmPortLabel.VerticalAlignment = "Center"; $winrmPortLabel.Margin = "0,0,5,0"
+        $winrmPortBox = New-Object System.Windows.Controls.TextBox; $winrmPortBox.Text = "5985"; $winrmPortBox.Width = 40; $winrmPortBox.Height = 25; $winrmPortBox.VerticalAlignment = "Center"
+        [void]$winrmStack.Children.Add($winrmCheckBox); [void]$winrmStack.Children.Add($winrmPortLabel); [void]$winrmStack.Children.Add($winrmPortBox)
+        [System.Windows.Controls.Grid]::SetRow($winrmStack, 6); [System.Windows.Controls.Grid]::SetColumn($winrmStack, 1); [void]$grid.Children.Add($winrmStack)
+        
+        $groupBox.Content = $grid
+        [void]$serverContainer.Children.Add($groupBox)
+        
+        $script:serverControls += @{
+            ServerNumber = $script:serverCount; IPTextBox = $ipTextBox; UserTextBox = $userTextBox; PasswordBox = $passwordBox; ServiceComboBox = $serviceComboBox
+            UseTraefikCheckBox = $traefikCheckBox; SSHCheckBox = $sshCheckBox; SSHPortBox = $sshPortBox; WinRMCheckBox = $winrmCheckBox; WinRMPortBox = $winrmPortBox
+        }
+        Write-LogInfo -Message "Successfully added UI block for Server $($script:serverCount)" -Component "GUI"
+    } catch {
+        Write-LogError -Message "Failed to build Add-ServerBox UI element." -Component "GUI" -Exception $_
     }
 }
 
@@ -282,26 +288,33 @@ function Add-ServerBox {
     Array of PSCustomObjects containing the IP, Credentials, and Configuration for each server.
 #>
 function Get-AllServerConfigs {
-    $allConfigs = @()
-    foreach ($controls in $script:serverControls) {
-        $sp = if ([string]::IsNullOrWhiteSpace($controls.SSHPortBox.Text)) { 22 } else { [int]$controls.SSHPortBox.Text }
-        $wp = if ([string]::IsNullOrWhiteSpace($controls.WinRMPortBox.Text)) { 5985 } else { [int]$controls.WinRMPortBox.Text }
-        
-        $config = [PSCustomObject]@{
-            ServerNumber = $controls.ServerNumber
-            IP = $controls.IPTextBox.Text
-            User = $controls.UserTextBox.Text
-            Password = $controls.PasswordBox.Password
-            Service = if ($controls.ServiceComboBox.SelectedItem) { $controls.ServiceComboBox.SelectedItem.Content } else { $null }
-            UseTraefik = [bool]$controls.UseTraefikCheckBox.IsChecked
-            EnableSSH = [bool]$controls.SSHCheckBox.IsChecked
-            SSHPort = $sp
-            EnableWinRM = [bool]$controls.WinRMCheckBox.IsChecked
-            WinRMPort = $wp
+    Write-LogDebug -Message "Entering Get-AllServerConfigs to read UI elements." -Component "GUI"
+    try {
+        $allConfigs = @()
+        foreach ($controls in $script:serverControls) {
+            $sp = if ([string]::IsNullOrWhiteSpace($controls.SSHPortBox.Text)) { 22 } else { [int]$controls.SSHPortBox.Text }
+            $wp = if ([string]::IsNullOrWhiteSpace($controls.WinRMPortBox.Text)) { 5985 } else { [int]$controls.WinRMPortBox.Text }
+            
+            $config = [PSCustomObject]@{
+                ServerNumber = $controls.ServerNumber
+                IP = $controls.IPTextBox.Text
+                User = $controls.UserTextBox.Text
+                Password = $controls.PasswordBox.Password
+                Service = if ($controls.ServiceComboBox.SelectedItem) { $controls.ServiceComboBox.SelectedItem.Content } else { $null }
+                UseTraefik = [bool]$controls.UseTraefikCheckBox.IsChecked
+                EnableSSH = [bool]$controls.SSHCheckBox.IsChecked
+                SSHPort = $sp
+                EnableWinRM = [bool]$controls.WinRMCheckBox.IsChecked
+                WinRMPort = $wp
+            }
+            $allConfigs += $config
         }
-        $allConfigs += $config
+        Write-LogDebug -Message "Gathered $($allConfigs.Count) server configuration(s) from UI." -Component "GUI"
+        return ,$allConfigs
+    } catch {
+        Write-LogError -Message "Failed to read server configurations from UI." -Component "GUI" -Exception $_
+        return ,@()
     }
-    return ,$allConfigs
 }
 
 <#
@@ -317,19 +330,19 @@ function Get-AllServerConfigs {
 #>
 function Test-IPAddress {
     param([string]$IP)
+    Write-LogDebug -Message "Entering Test-IPAddress for: $IP" -Component "GUI"
     
     if ([string]::IsNullOrWhiteSpace($IP)) {
+        Write-LogDebug -Message "IP Address string is empty or null." -Component "GUI"
         return $false
     }
     
-    # Try to parse as IPv4 address first (most reliable method)
     try {
         $ipObj = [System.Net.IPAddress]::Parse($IP)
-        # Check if it's IPv4 (AddressFamily = InterNetwork)
         if ($ipObj.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
-            # Additional validation: must have exactly 4 octets in original string
             $octets = $IP.Split('.')
             if ($octets.Count -eq 4) {
+                Write-LogDebug -Message "Validated $IP as correct IPv4 format." -Component "GUI"
                 return $true
             }
         }
@@ -338,17 +351,15 @@ function Test-IPAddress {
         # Not a valid IP, continue to hostname check
     }
     
-    # Check if it's a valid hostname
-    # Hostname rules: 1-63 chars per label, alphanumeric + hyphens, cannot start/end with hyphen
     $hostnamePattern = '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
-    
     if ($IP -match $hostnamePattern) {
-        # Additional check: hostname shouldn't be all numbers with dots (would look like malformed IP)
         if ($IP -notmatch '^\d+(\.\d+)*$') {
+            Write-LogDebug -Message "Validated $IP as correct hostname format." -Component "GUI"
             return $true
         }
     }
     
+    Write-LogDebug -Message "Failed validation for: $IP" -Component "GUI"
     return $false
 }
 
@@ -366,20 +377,27 @@ function Test-IPAddress {
 #>
 function Test-ServerConfigs {
     param($Configs)
-    $validationErrors = @()
-    foreach ($config in $Configs) {
-        $serverNum = $config.ServerNumber
-        if ([string]::IsNullOrWhiteSpace($config.IP)) { $validationErrors += "Server $($serverNum): IP Address is required" }
-        elseif (-not (Test-IPAddress $config.IP)) { $validationErrors += "Server $($serverNum): Invalid IP Address format" }
-        if ([string]::IsNullOrWhiteSpace($config.User)) { $validationErrors += "Server $($serverNum): Username is required" }
-        if ([string]::IsNullOrWhiteSpace($config.Password)) { $validationErrors += "Server $($serverNum): Password is required" }
-        if ([string]::IsNullOrWhiteSpace($config.Service)) { $validationErrors += "Server $($serverNum): Service selection is required" }
-        
-        if (-not $config.EnableSSH -and -not $config.EnableWinRM) { $validationErrors += "Server $($serverNum): Must enable at least SSH or WinRM" }
-        if ($config.EnableSSH -and ($config.SSHPort -le 0 -or $config.SSHPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid SSH Port" }
-        if ($config.EnableWinRM -and ($config.WinRMPort -le 0 -or $config.WinRMPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid WinRM Port" }
+    Write-LogDebug -Message "Entering Test-ServerConfigs to validate inputs." -Component "GUI"
+    try {
+        $validationErrors = @()
+        foreach ($config in $Configs) {
+            $serverNum = $config.ServerNumber
+            if ([string]::IsNullOrWhiteSpace($config.IP)) { $validationErrors += "Server $($serverNum): IP Address is required" }
+            elseif (-not (Test-IPAddress $config.IP)) { $validationErrors += "Server $($serverNum): Invalid IP Address format" }
+            if ([string]::IsNullOrWhiteSpace($config.User)) { $validationErrors += "Server $($serverNum): Username is required" }
+            if ([string]::IsNullOrWhiteSpace($config.Password)) { $validationErrors += "Server $($serverNum): Password is required" }
+            if ([string]::IsNullOrWhiteSpace($config.Service)) { $validationErrors += "Server $($serverNum): Service selection is required" }
+            
+            if (-not $config.EnableSSH -and -not $config.EnableWinRM) { $validationErrors += "Server $($serverNum): Must enable at least SSH or WinRM" }
+            if ($config.EnableSSH -and ($config.SSHPort -le 0 -or $config.SSHPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid SSH Port" }
+            if ($config.EnableWinRM -and ($config.WinRMPort -le 0 -or $config.WinRMPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid WinRM Port" }
+        }
+        Write-LogDebug -Message "Test-ServerConfigs completed with $($validationErrors.Count) errors." -Component "GUI"
+        return $validationErrors
+    } catch {
+        Write-LogError -Message "Error during Test-ServerConfigs validation." -Component "GUI" -Exception $_
+        return @("Critical validation processing error: $($_.Exception.Message)")
     }
-    return $validationErrors
 }
 
 $reader = New-Object System.Xml.XmlNodeReader $xaml
@@ -842,11 +860,11 @@ function Show-HealthMonitorWindow {
                 $btnStop.Tag = $tagData
                 $btnStop.Add_Click({
                     $data = $this.Tag
-                    $statusBarText.Text = "Starting $($data.ContainerName) on $($data.Config.IP)..."
+                    $statusBarText.Text = "Stopping $($data.ContainerName) on $($data.Config.IP)..."
                     $this.Dispatcher.Invoke([action]{}, "Background")
                     Set-ConnectionConfig -SSHPort $data.Config.SSHPort -WinRMPort $data.Config.WinRMPort -EnableSSH $data.Config.EnableSSH -EnableWinRM $data.Config.EnableWinRM
-                    $res = Start-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
-                    if ($res) { $statusBarText.Text = "Started $($data.ContainerName)." } else { $statusBarText.Text = "Failed to start $($data.ContainerName)." }
+                    $res = Stop-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
+                    if ($res) { $statusBarText.Text = "Stopped $($data.ContainerName)." } else { $statusBarText.Text = "Failed to stop $($data.ContainerName)." }
                     Refresh-HealthData
                 })
 
@@ -859,11 +877,11 @@ function Show-HealthMonitorWindow {
                 $btnRestart.Tag = $tagData
                 $btnRestart.Add_Click({
                     $data = $this.Tag
-                    $statusBarText.Text = "Starting $($data.ContainerName) on $($data.Config.IP)..."
+                    $statusBarText.Text = "Restarting $($data.ContainerName) on $($data.Config.IP)..."
                     $this.Dispatcher.Invoke([action]{}, "Background")
                     Set-ConnectionConfig -SSHPort $data.Config.SSHPort -WinRMPort $data.Config.WinRMPort -EnableSSH $data.Config.EnableSSH -EnableWinRM $data.Config.EnableWinRM
-                    $res = Start-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
-                    if ($res) { $statusBarText.Text = "Started $($data.ContainerName)." } else { $statusBarText.Text = "Failed to start $($data.ContainerName)." }
+                    $res = Restart-Container -IP $data.Config.IP -User $data.Config.User -Password $data.Config.Password -ContainerName $data.ContainerName
+                    if ($res) { $statusBarText.Text = "Restarted $($data.ContainerName)." } else { $statusBarText.Text = "Failed to restart $($data.ContainerName)." }
                     Refresh-HealthData
                 })
 
@@ -1712,13 +1730,12 @@ $runSetupButton.Add_Click({
             $OutputQueue,
             $ModulesPath,
             $TerminalMode,
-            $ServicesDir
+            $ServicesDir,
+            $LogPath        
         )
         
-        # Helper function to queue output messages
         function Send-Output {
             param([string]$Message, [string]$Color = "White", [int]$ServerNum, [switch]$AdvancedOnly)
-            # If AdvancedOnly is set, only show in Advanced mode
             if ($AdvancedOnly -and $TerminalMode -ne "Advanced") {
                 return
             }
@@ -1729,21 +1746,16 @@ $runSetupButton.Add_Click({
             })
         }
         
-        # Helper function to capture and forward Write-Host output from module functions
         function Invoke-WithOutput {
             param(
                 [scriptblock]$ScriptBlock,
                 [int]$ServerNum
             )
             
-            # Use a StringWriter to capture console output
-            $previousHost = $Host
-            $infoRecords = @()
             $capturedOutput = $null
             $errorOutput = $null
             
             try {
-                # Redirect Information stream (6) to output and capture everything
                 $capturedOutput = & {
                     & $ScriptBlock *>&1
                 } 6>&1 2>&1
@@ -1752,7 +1764,6 @@ $runSetupButton.Add_Click({
                 $errorOutput = $_.Exception.Message
             }
             
-            # Process captured output
             if ($capturedOutput) {
                 foreach ($item in $capturedOutput) {
                     if ($null -eq $item) { continue }
@@ -1762,7 +1773,6 @@ $runSetupButton.Add_Click({
                     
                     if ($item -is [System.Management.Automation.InformationRecord]) {
                         $message = $item.MessageData.ToString()
-                        # Try to get foreground color from InformationRecord
                         if ($item.Tags -contains "PSHOST") {
                             $fgColor = $item.MessageData.ForegroundColor
                             if ($fgColor) {
@@ -1784,7 +1794,6 @@ $runSetupButton.Add_Click({
                     }
                     elseif ($item -is [System.Management.Automation.HostInformationMessage]) {
                         $message = $item.Message
-                        # Get color from the HostInformationMessage
                         if ($item.ForegroundColor) {
                             switch ($item.ForegroundColor.ToString()) {
                                 "Green" { $messageColor = "Green" }
@@ -1803,7 +1812,6 @@ $runSetupButton.Add_Click({
                     
                     if ([string]::IsNullOrWhiteSpace($message)) { continue }
                     
-                    # Auto-detect color from content if not already set to a specific color
                     if ($messageColor -eq "Gray" -or $messageColor -eq "White") {
                         if ($message -match "error|fail|denied|cannot") { $messageColor = "Red" }
                         elseif ($message -match "success|installed|complete|ready|running") { $messageColor = "Green" }
@@ -1811,7 +1819,6 @@ $runSetupButton.Add_Click({
                         elseif ($message -match "starting|checking|creating|deploying|installing|verifying|updating|detecting|setting") { $messageColor = "Cyan" }
                     }
                     
-                    # In Advanced mode, show all output; in Simple mode, only show important messages
                     if ($TerminalMode -eq "Advanced") {
                         Send-Output -Message "    $message" -Color $messageColor -ServerNum $ServerNum
                     }
@@ -1821,21 +1828,21 @@ $runSetupButton.Add_Click({
                 }
             }
             
-            # Handle any captured errors
             if ($errorOutput) {
                 Send-Output -Message "    Error: $errorOutput" -Color "Red" -ServerNum $ServerNum
             }
         }
         
-        # Import the consolidated RMSetup module in the runspace
-        # This module contains all functionality: Logging, Remote Connection, Health Monitoring, Service Installation, WSL2 Setup
         Import-Module "$ModulesPath\RMSetup.psm1" -Force
+        Set-LogConfiguration -LogPath $LogPath -LogLevel "Info"
         Set-ConnectionConfig -SSHPort $Config.SSHPort -WinRMPort $Config.WinRMPort -EnableSSH $Config.EnableSSH -EnableWinRM $Config.EnableWinRM
+        
+        # Adding explicit Write-Log entries for the deployment sequence to ensure tracing
+        Write-LogInfo -Message "Initiating deployment for Server $($Config.ServerNumber) ($($Config.IP))" -Component "DeploymentThread"
         
         $serverNum = $Config.ServerNumber
         Send-Output -Message "[Server $serverNum] Starting deployment to $($Config.IP)..." -Color "Cyan" -ServerNum $serverNum
         
-        # Test connection to the server
         Send-Output -Message "[Server $serverNum] Testing connection..." -Color "Cyan" -ServerNum $serverNum -AdvancedOnly
         Invoke-WithOutput -ScriptBlock {
             $script:connectionResult = Test-RemoteConnection -IP $Config.IP -User $Config.User -Password $Config.Password
@@ -1844,12 +1851,12 @@ $runSetupButton.Add_Click({
         
         if (-not $connectionResult) {
             Send-Output -Message "[Server $serverNum] Failed to connect to $($Config.IP). Skipping..." -Color "Red" -ServerNum $serverNum
+            Write-LogError -Message "Failed to connect to $($Config.IP). Aborting deployment." -Component "DeploymentThread"
             return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Connection failed" }
         }
         
         Send-Output -Message "[Server $serverNum] Successfully connected to $($Config.IP)" -Color "Green" -ServerNum $serverNum
         
-        # Get the OS type
         Send-Output -Message "[Server $serverNum] Detecting operating system..." -Color "Cyan" -ServerNum $serverNum -AdvancedOnly
         Invoke-WithOutput -ScriptBlock {
             $script:osType = Get-TargetOS -IP $Config.IP
@@ -1857,10 +1864,7 @@ $runSetupButton.Add_Click({
         $osType = $script:osType
         Send-Output -Message "[Server $serverNum] Detected OS: $osType" -Color "Cyan" -ServerNum $serverNum
         
-        # Deploy service based on OS
         if ($osType -eq "Linux") {
-            
-            # --- NEW: Install Docker ---
             Send-Output -Message "[Server $serverNum] Verifying/Installing Docker..." -Color "Cyan" -ServerNum $serverNum
             Invoke-WithOutput -ScriptBlock {
                 $script:dockerSuccess = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
@@ -1869,13 +1873,12 @@ $runSetupButton.Add_Click({
             
             if (-not $dockerSuccess) {
                 Send-Output -Message "[Server $serverNum] Docker installation failed. Skipping..." -Color "Red" -ServerNum $serverNum
+                Write-LogError -Message "Docker installation failed on $($Config.IP). Aborting deployment." -Component "DeploymentThread"
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
             }
-            # ---------------------------
 
             Send-Output -Message "[Server $serverNum] Docker is ready" -Color "Green" -ServerNum $serverNum
             
-            # Install Traefik
             if ($Config.UseTraefik) {
                 Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy..." -Color "Cyan" -ServerNum $serverNum
                 $traefikSuccess = $null
@@ -1894,7 +1897,6 @@ $runSetupButton.Add_Click({
                 Send-Output -Message "[Server $serverNum] Traefik installation skipped (Disabled in config)" -Color "Gray" -ServerNum $serverNum
             }
             
-            # Deploy the selected service
             Send-Output -Message "[Server $serverNum] Deploying service: $($Config.Service)" -Color "Yellow" -ServerNum $serverNum
             
             $composeFileName = "$($Config.Service).yml"
@@ -1902,6 +1904,7 @@ $runSetupButton.Add_Click({
             
             if (-not (Test-Path $composePath)) {
                 Send-Output -Message "[Server $serverNum] Error: Config file not found ($composeFileName)" -Color "Red" -ServerNum $serverNum
+                Write-LogError -Message "Compose file not found: $composeFileName" -Component "DeploymentThread"
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Config missing" }
             }
             
@@ -1914,16 +1917,16 @@ $runSetupButton.Add_Click({
             $serviceSuccess = $script:serviceSuccess
             if ($serviceSuccess) {
                 Send-Output -Message "[Server $serverNum] $($Config.Service) deployed successfully" -Color "Green" -ServerNum $serverNum
+                Write-LogSuccess -Message "$($Config.Service) deployed successfully on $($Config.IP)" -Component "DeploymentThread"
             } else {
                 Send-Output -Message "[Server $serverNum] $($Config.Service) deployment failed" -Color "Red" -ServerNum $serverNum
+                Write-LogError -Message "$($Config.Service) deployment failed on $($Config.IP)" -Component "DeploymentThread"
             }
             
             Send-Output -Message "[Server $serverNum] Deployment complete" -Color "Cyan" -ServerNum $serverNum
             return @{ Success = $serviceSuccess; ServerNum = $serverNum; IP = $Config.IP; Service = $Config.Service }
         }
         elseif ($osType -eq "Windows") {
-            
-            # --- NEW: Install WSL2 and Docker ---
             Send-Output -Message "[Server $serverNum] Verifying/Installing WSL2..." -Color "Cyan" -ServerNum $serverNum
             Invoke-WithOutput -ScriptBlock {
                 $script:wslResult = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password
@@ -1932,6 +1935,7 @@ $runSetupButton.Add_Click({
             
             if (-not $wslResult.Ready) {
                 Send-Output -Message "[Server $serverNum] WSL2 setup not ready: $($wslResult.Message)" -Color "Red" -ServerNum $serverNum
+                Write-LogError -Message "WSL2 setup not ready on $($Config.IP): $($wslResult.Message)" -Component "DeploymentThread"
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "WSL2 not ready" }
             }
 
@@ -1943,9 +1947,9 @@ $runSetupButton.Add_Click({
             
             if (-not $dockerSuccess) {
                 Send-Output -Message "[Server $serverNum] Docker installation failed in WSL2. Skipping..." -Color "Red" -ServerNum $serverNum
+                Write-LogError -Message "Docker installation failed in WSL2 on $($Config.IP). Aborting deployment." -Component "DeploymentThread"
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
             }
-            # -------------------------------------
 
             Send-Output -Message "[Server $serverNum] Docker is ready in WSL2" -Color "Green" -ServerNum $serverNum
             
@@ -1973,6 +1977,7 @@ $runSetupButton.Add_Click({
             
             if (-not (Test-Path $composePath)) {
                 Send-Output -Message "[Server $serverNum] Error: Config file not found ($composeFileName)" -Color "Red" -ServerNum $serverNum
+                Write-LogError -Message "Compose file not found: $composeFileName" -Component "DeploymentThread"
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Config missing" }
             }
             
@@ -1985,8 +1990,10 @@ $runSetupButton.Add_Click({
             $serviceSuccess = $script:serviceSuccess
             if ($serviceSuccess) {
                 Send-Output -Message "[Server $serverNum] $($Config.Service) deployed successfully" -Color "Green" -ServerNum $serverNum
+                Write-LogSuccess -Message "$($Config.Service) deployed successfully on $($Config.IP)" -Component "DeploymentThread"
             } else {
                 Send-Output -Message "[Server $serverNum] $($Config.Service) deployment failed" -Color "Red" -ServerNum $serverNum
+                Write-LogError -Message "$($Config.Service) deployment failed on $($Config.IP)" -Component "DeploymentThread"
             }
             
             Send-Output -Message "[Server $serverNum] Deployment complete" -Color "Cyan" -ServerNum $serverNum
@@ -1994,6 +2001,7 @@ $runSetupButton.Add_Click({
         }
         else {
             Send-Output -Message "[Server $serverNum] Unable to detect OS type. Skipping deployment." -Color "Red" -ServerNum $serverNum
+            Write-LogError -Message "Unable to detect OS type on $($Config.IP)" -Component "DeploymentThread"
             return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Unknown OS" }
         }
     }
@@ -2007,8 +2015,9 @@ $runSetupButton.Add_Click({
         [void]$powershell.AddArgument($config)
         [void]$powershell.AddArgument($global:outputQueue)
         [void]$powershell.AddArgument("$PSScriptRoot\modules")
-        [void]$powershell.AddArgument($script:terminalMode)  # Pass terminal mode to runspace
+        [void]$powershell.AddArgument($script:terminalMode)  
         [void]$powershell.AddArgument($servicesDir)
+        [void]$powershell.AddArgument((Get-LogFilePath))
         
         $handle = $powershell.BeginInvoke()
         
@@ -2065,6 +2074,7 @@ $runSetupButton.Add_Click({
                 }
                 catch {
                     Write-TerminalOutput -Message "[Server $($rs.ServerNum)] Error: $_" -Color "Red"
+                    Write-LogError -Message "Runspace execution failed: $_" -Component "GUI"
                 }
                 finally {
                     $rs.PowerShell.Dispose()
@@ -2087,9 +2097,10 @@ $runSetupButton.Add_Click({
             # Summary
             Write-TerminalOutput -Message "" -Color "White"
             Write-TerminalOutput -Message "========== Deployment Summary ==========" -Color "Cyan"
+            Write-LogInfo -Message "Deployment execution finished. Generating summary." -Component "GUI"
             
-            $successCount = ($global:deploymentResults | Where-Object { $_.Success -eq $true }).Count
-            $failCount = ($global:deploymentResults | Where-Object { $_.Success -eq $false }).Count
+            $successCount = @($global:deploymentResults | Where-Object { $_.Success -eq $true }).Count
+            $failCount = @($global:deploymentResults | Where-Object { $_.Success -eq $false }).Count
             
             Write-TerminalOutput -Message "Successful: $successCount" -Color "Green"
             Write-TerminalOutput -Message "Failed: $failCount" -Color $(if ($failCount -gt 0) { "Red" } else { "Green" })
