@@ -1859,6 +1859,20 @@ $runSetupButton.Add_Click({
         
         # Deploy service based on OS
         if ($osType -eq "Linux") {
+            
+            # --- NEW: Install Docker ---
+            Send-Output -Message "[Server $serverNum] Verifying/Installing Docker..." -Color "Cyan" -ServerNum $serverNum
+            Invoke-WithOutput -ScriptBlock {
+                $script:dockerSuccess = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
+            } -ServerNum $serverNum
+            $dockerSuccess = $script:dockerSuccess
+            
+            if (-not $dockerSuccess) {
+                Send-Output -Message "[Server $serverNum] Docker installation failed. Skipping..." -Color "Red" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
+            }
+            # ---------------------------
+
             Send-Output -Message "[Server $serverNum] Docker is ready" -Color "Green" -ServerNum $serverNum
             
             # Install Traefik
@@ -1908,6 +1922,31 @@ $runSetupButton.Add_Click({
             return @{ Success = $serviceSuccess; ServerNum = $serverNum; IP = $Config.IP; Service = $Config.Service }
         }
         elseif ($osType -eq "Windows") {
+            
+            # --- NEW: Install WSL2 and Docker ---
+            Send-Output -Message "[Server $serverNum] Verifying/Installing WSL2..." -Color "Cyan" -ServerNum $serverNum
+            Invoke-WithOutput -ScriptBlock {
+                $script:wslResult = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password
+            } -ServerNum $serverNum
+            $wslResult = $script:wslResult
+            
+            if (-not $wslResult.Ready) {
+                Send-Output -Message "[Server $serverNum] WSL2 setup not ready: $($wslResult.Message)" -Color "Red" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "WSL2 not ready" }
+            }
+
+            Send-Output -Message "[Server $serverNum] Verifying/Installing Docker in WSL2..." -Color "Cyan" -ServerNum $serverNum
+            Invoke-WithOutput -ScriptBlock {
+                $script:dockerSuccess = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
+            } -ServerNum $serverNum
+            $dockerSuccess = $script:dockerSuccess
+            
+            if (-not $dockerSuccess) {
+                Send-Output -Message "[Server $serverNum] Docker installation failed in WSL2. Skipping..." -Color "Red" -ServerNum $serverNum
+                return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
+            }
+            # -------------------------------------
+
             Send-Output -Message "[Server $serverNum] Docker is ready in WSL2" -Color "Green" -ServerNum $serverNum
             
             if ($Config.UseTraefik) {
