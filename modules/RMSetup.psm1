@@ -185,10 +185,19 @@ function Write-Log {
     }
     
     if ($script:LogToFile -and -not [string]::IsNullOrEmpty($script:LogFilePath)) {
-        try {
-            Add-Content -Path $script:LogFilePath -Value $logMessage -Encoding UTF8
+        # THREAD-SAFE WRITING: Prevents file-lock crashes when parallel runspaces log concurrently
+        $retryCount = 0
+        $success = $false
+        while (-not $success -and $retryCount -lt 5) {
+            try {
+                [System.IO.File]::AppendAllText($script:LogFilePath, $logMessage + "`r`n", [System.Text.Encoding]::UTF8)
+                $success = $true
+            }
+            catch {
+                $retryCount++
+                Start-Sleep -Milliseconds (Get-Random -Minimum 50 -Maximum 150)
+            }
         }
-        catch {}
     }
     
     if ($script:LogToConsole) {
@@ -286,6 +295,26 @@ function Write-SessionSeparator {
         Add-Content -Path $script:LogFilePath -Value $separator -Encoding UTF8
     }
 }
+
+<#
+.SYNOPSIS
+    Binds a background runspace to an existing log file.
+.DESCRIPTION
+    Why: Background threads (runspaces) do not inherit script-scoped variables from the main thread.
+    This function receives the active log path from the GUI and explicitly assigns it so background logs aren't lost.
+#>
+function Set-LogConfiguration {
+    param(
+        [Parameter(Mandatory=$true)]
+        [string]$LogPath, 
+        
+        [string]$LogLevel = "Info"
+    )
+    $script:LogFilePath = $LogPath
+    $script:LogLevel = $LogLevel
+    $script:LogToFile = $true
+    $script:LogToConsole = $false
+}
 #endregion
 
 #===============================================================================
@@ -306,6 +335,7 @@ function Write-SessionSeparator {
 #>
 function Get-TargetOS {
     param ([string]$IP)
+    Write-LogDebug -Message "Entering Get-TargetOS for IP: $IP" -Component "RemoteConnection"
     try {
         Write-LogDebug -Message "Detecting OS for $IP via TCP ports" -Component "RemoteConnection"
         
@@ -332,6 +362,7 @@ function Get-TargetOS {
             if ($ttl -ge 120 -and $ttl -le 128 -and $script:EnableWinRM) { return "Windows" }
             elseif ($ttl -ge 60 -and $ttl -le 64 -and $script:EnableSSH) { return "Linux" }
         }
+        Write-LogWarning -Message "Could not detect Target OS for $IP" -Component "RemoteConnection"
         return $null
     }
     catch {
@@ -350,17 +381,30 @@ function Get-TargetOS {
 #>
 function Test-SSHConnection {
     param ([string]$IP, [string]$User, [string]$Password)
+    Write-LogDebug -Message "Entering Test-SSHConnection for IP: $IP" -Component "RemoteConnection"
     try {
         if (Get-Command plink -ErrorAction SilentlyContinue) {
             $tempAnswerFile = [System.IO.Path]::GetTempFileName()
             Set-Content -Path $tempAnswerFile -Value "y"
             try {
                 $result = Get-Content $tempAnswerFile | & plink -P $script:SSHPort -pw $Password $User@$IP "hostname" 2>&1
-                if ($LASTEXITCODE -eq 0 -and $result -and $result -notmatch "FATAL ERROR" -and $result -notmatch "Access denied") { return $true }
-                else { return $false }
+                if ($LASTEXITCODE -eq 0 -and $result -and $result -notmatch "FATAL ERROR" -and $result -notmatch "Access denied") { 
+                    Write-LogInfo -Message "SSH connection test successful for $IP" -Component "RemoteConnection"
+                    return $true 
+                }
+                else { 
+                    Write-LogWarning -Message "SSH connection test failed for $IP. Output: $result" -Component "RemoteConnection"
+                    return $false 
+                }
             } finally { if (Test-Path $tempAnswerFile) { Remove-Item $tempAnswerFile -Force } }
-        } else { return $false }
-    } catch { return $false }
+        } else { 
+            Write-LogError -Message "plink binary not found on the host machine" -Component "RemoteConnection"
+            return $false 
+        }
+    } catch { 
+        Write-LogError -Message "Exception during Test-SSHConnection for $IP" -Component "RemoteConnection" -Exception $_
+        return $false 
+    }
 }
 
 <#
@@ -372,17 +416,28 @@ function Test-SSHConnection {
 #>
 function Test-WinRMConnection {
     param ([string]$IP, [string]$User, [string]$Password)
+    Write-LogDebug -Message "Entering Test-WinRMConnection for IP: $IP" -Component "RemoteConnection"
     try {
         $winrmService = Get-Service -Name WinRM -ErrorAction SilentlyContinue
-        if ($winrmService -and $winrmService.Status -ne 'Running') { try { Start-Service -Name WinRM -ErrorAction Stop } catch {} }
+        if ($winrmService -and $winrmService.Status -ne 'Running') { 
+            try { Start-Service -Name WinRM -ErrorAction Stop } 
+            catch { Write-LogWarning -Message "Could not start local WinRM service" -Component "RemoteConnection" } 
+        }
         
         $winSecurePassword = ConvertTo-SecureString $Password -AsPlainText -Force
         $winCredential = New-Object System.Management.Automation.PSCredential ($User, $winSecurePassword)
         $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
         
         $winSession = New-PSSession -ComputerName $IP -Port $script:WinRMPort -Credential $winCredential -SessionOption $sessionOption -ErrorAction Stop
-        if ($winSession) { Remove-PSSession -Session $winSession; return $true }
-    } catch { return $false }
+        if ($winSession) { 
+            Remove-PSSession -Session $winSession
+            Write-LogInfo -Message "WinRM connection test successful for $IP" -Component "RemoteConnection"
+            return $true 
+        }
+    } catch { 
+        Write-LogError -Message "Exception during Test-WinRMConnection for $IP" -Component "RemoteConnection" -Exception $_
+        return $false 
+    }
 }
 
 <#
@@ -394,6 +449,7 @@ function Test-WinRMConnection {
 #>
 function Test-RemoteConnection {
     param ([string]$IP, [string]$User, [string]$Password)
+    Write-LogDebug -Message "Entering Test-RemoteConnection for IP: $IP" -Component "RemoteConnection"
     try {
         $successfulPings = 0
         for ($i = 1; $i -le 4; $i++) {
@@ -407,8 +463,14 @@ function Test-RemoteConnection {
             if ($targetOS -eq "Windows") { return Test-WinRMConnection -IP $IP -User $User -Password $Password } 
             elseif ($targetOS -eq "Linux") { return Test-SSHConnection -IP $IP -User $User -Password $Password }
             else { return $false }
-        } else { return $false }
-    } catch { return $false }
+        } else { 
+            Write-LogWarning -Message "Ping test failed for $IP (Successful Pings: $successfulPings/4)" -Component "RemoteConnection"
+            return $false 
+        }
+    } catch { 
+        Write-LogError -Message "Exception during Test-RemoteConnection for $IP" -Component "RemoteConnection" -Exception $_
+        return $false 
+    }
 }
 
 <#
@@ -421,13 +483,17 @@ function Test-RemoteConnection {
 #>
 function Invoke-WSLCommand {
     param ([string]$IP, [string]$User, [string]$Password, [string]$Command, [string]$Distribution = "Ubuntu")
+    Write-LogDebug -Message "Entering Invoke-WSLCommand for IP: $IP" -Component "RemoteConnection"
     try {
         $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
         $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
         $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
         $session = New-PSSession -ComputerName $IP -Port $script:WinRMPort -Credential $credential -SessionOption $sessionOption -ErrorAction Stop
         
-        if (-not $session) { return $null }
+        if (-not $session) { 
+            Write-LogError -Message "Failed to create PSSession for WSLCommand on $IP" -Component "RemoteConnection"
+            return $null 
+        }
         
         $result = Invoke-Command -Session $session -ScriptBlock {
             param($Cmd, $Distro)
@@ -439,9 +505,16 @@ function Invoke-WSLCommand {
             return @{ Output = $output; ExitCode = $LASTEXITCODE; WSLNotReady = $false }
         } -ArgumentList $Command, $Distribution
         Remove-PSSession -Session $session
-        if ($result.WSLNotReady) { return $null }
+        if ($result.WSLNotReady) { 
+            Write-LogWarning -Message "WSL is not ready on target $IP" -Component "RemoteConnection"
+            return $null 
+        }
+        Write-LogDebug -Message "Invoke-WSLCommand executed successfully on $IP" -Component "RemoteConnection"
         return $result
-    } catch { return $null }
+    } catch { 
+        Write-LogError -Message "Exception in Invoke-WSLCommand for $IP" -Component "RemoteConnection" -Exception $_
+        return $null 
+    }
 }
 
 <#
@@ -459,21 +532,39 @@ function Invoke-WSLCommand {
 #>
 function Invoke-RemoteCommand {
     param([string]$IP, [string]$User, [string]$Password, [string]$Command, [string]$OSType = $null)
+    Write-LogDebug -Message "Entering Invoke-RemoteCommand for IP: $IP" -Component "RemoteConnection"
     try {
         $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
         if ($osType -eq "Linux") {
-            if (-not (Get-Command plink -ErrorAction SilentlyContinue)) { return $null }
+            if (-not (Get-Command plink -ErrorAction SilentlyContinue)) { 
+                Write-LogError -Message "plink binary not found on the host machine" -Component "RemoteConnection"
+                return $null 
+            }
             $result = Write-Output y | plink -P $script:SSHPort -batch -pw $Password "$User@$IP" $Command 2>&1
-            if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied|cannot|permission denied") { return $null }
+            if ($LASTEXITCODE -ne 0 -and $result -match "error|fatal|failed|denied|cannot|permission denied") { 
+                Write-LogWarning -Message "Remote command failed on Linux $IP. Exit code: $LASTEXITCODE" -Component "RemoteConnection"
+                return $null 
+            }
+            Write-LogDebug -Message "Remote command executed on Linux $IP" -Component "RemoteConnection"
             return $result
         }
         elseif ($osType -eq "Windows") {
             $wslResult = Invoke-WSLCommand -IP $IP -User $User -Password $Password -Command $Command
-            if ($null -eq $wslResult) { return $null }
+            if ($null -eq $wslResult) { 
+                Write-LogWarning -Message "Remote command failed on Windows $IP" -Component "RemoteConnection"
+                return $null 
+            }
+            Write-LogDebug -Message "Remote command executed on Windows $IP" -Component "RemoteConnection"
             return $wslResult.Output
         }
-        else { return $null }
-    } catch { return $null }
+        else { 
+            Write-LogError -Message "Could not determine OS for Invoke-RemoteCommand routing on $IP" -Component "RemoteConnection"
+            return $null 
+        }
+    } catch { 
+        Write-LogError -Message "Exception in Invoke-RemoteCommand for $IP" -Component "RemoteConnection" -Exception $_
+        return $null 
+    }
 }
 #endregion
 
@@ -490,18 +581,26 @@ function Invoke-RemoteCommand {
 #>
 function Get-ServerHealth {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
+    Write-LogDebug -Message "Entering Get-ServerHealth for IP: $IP" -Component "HealthMonitor"
     try {
         $pingResult = Test-Connection -ComputerName $IP -Count 1 -Quiet -ErrorAction SilentlyContinue
         if (-not $pingResult) {
+            Write-LogWarning -Message "Server $IP is offline during health check." -Component "HealthMonitor"
             return [PSCustomObject]@{ IP = $IP; Status = "Offline"; StatusColor = "Red"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = "Server not reachable" }
         }
         
         $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
         if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password $Password -OSType $osType }
         elseif ($osType -eq "Windows") { return Get-WindowsServerHealth -IP $IP -User $User -Password $Password }
-        else { return [PSCustomObject]@{ IP = $IP; Status = "Unknown"; StatusColor = "Yellow"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = "Could not detect OS type" } }
+        else { 
+            Write-LogWarning -Message "OS Type unknown for $IP during health check." -Component "HealthMonitor"
+            return [PSCustomObject]@{ IP = $IP; Status = "Unknown"; StatusColor = "Yellow"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = "Could not detect OS type" } 
+        }
     }
-    catch { return [PSCustomObject]@{ IP = $IP; Status = "Error"; StatusColor = "Red"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = $_.Exception.Message } }
+    catch { 
+        Write-LogError -Message "Exception in Get-ServerHealth for $IP" -Component "HealthMonitor" -Exception $_
+        return [PSCustomObject]@{ IP = $IP; Status = "Error"; StatusColor = "Red"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = $_.Exception.Message } 
+    }
 }
 
 <#
@@ -513,6 +612,7 @@ function Get-ServerHealth {
 #>
 function Get-LinuxServerHealth {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = "Linux")
+    Write-LogDebug -Message "Entering Get-LinuxServerHealth for IP: $IP" -Component "HealthMonitor"
     try {
         $healthCommand = @"
 echo '===CPU===' && top -bn1 | grep 'Cpu(s)' | awk '{print 100 - `$8}' && \
@@ -522,7 +622,7 @@ echo '===UPTIME===' && uptime -p && \
 echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
 "@
         $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $healthCommand -OSType $OSType
-        if ($null -eq $result) { throw "Failed to retrieve health metrics" }
+        if ($null -eq $result) { throw "Failed to retrieve health metrics via SSH" }
         
         $resultLines = $result -split "`n"
         $cpuUsage = $null; $memoryUsed = $null; $memoryTotal = $null; $memoryPercent = $null; $diskPercent = $null; $uptime = $null; $load1 = $null; $load5 = $null; $load15 = $null
@@ -586,6 +686,7 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
         return [PSCustomObject]@{ IP = $IP; OSType = "Linux"; Status = $status; StatusColor = $statusColor; CPU = [PSCustomObject]@{ UsagePercent = $cpuUsage }; Memory = [PSCustomObject]@{ UsedMB = $memoryUsed; TotalMB = $memoryTotal; UsagePercent = $memoryPercent }; Disk = [PSCustomObject]@{ UsagePercent = $diskPercent }; Uptime = $uptime; Load = [PSCustomObject]@{ Load1Min = $load1; Load5Min = $load5; Load15Min = $load15 }; LastChecked = Get-Date; ErrorMessage = $null }
     }
     catch { 
+        Write-LogError -Message "Error in Get-LinuxServerHealth for $IP" -Component "HealthMonitor" -Exception $_
         return [PSCustomObject]@{ IP = $IP; OSType = "Linux"; Status = "Error"; StatusColor = "Red"; CPU = $null; Memory = $null; Disk = $null; Uptime = $null; Load = $null; LastChecked = Get-Date; ErrorMessage = $_.Exception.Message } 
     }
 }
@@ -599,6 +700,7 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
 #>
 function Get-WindowsServerHealth {
     param([string]$IP, [string]$User, [string]$Password)
+    Write-LogDebug -Message "Entering Get-WindowsServerHealth for IP: $IP" -Component "HealthMonitor"
     try {
         $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
         $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
@@ -616,8 +718,13 @@ function Get-WindowsServerHealth {
         $status = "Healthy"; $statusColor = "Green"
         if (($healthData.CPU -gt 90) -or ($healthData.MemoryPercent -gt 90) -or ($healthData.DiskPercent -gt 90)) { $status = "Critical"; $statusColor = "Red" }
         elseif (($healthData.CPU -gt 70) -or ($healthData.MemoryPercent -gt 70) -or ($healthData.DiskPercent -gt 80)) { $status = "Warning"; $statusColor = "Yellow" }
+        
+        Write-LogDebug -Message "Successfully parsed Windows health stats for $IP" -Component "HealthMonitor"
         return [PSCustomObject]@{ IP = $IP; OSType = "Windows"; Status = $status; StatusColor = $statusColor; CPU = [PSCustomObject]@{ UsagePercent = $healthData.CPU }; Memory = [PSCustomObject]@{ UsedMB = $healthData.MemoryUsed; TotalMB = $healthData.MemoryTotal; UsagePercent = $healthData.MemoryPercent }; Disk = [PSCustomObject]@{ UsagePercent = $healthData.DiskPercent }; Uptime = $healthData.Uptime; Load = [PSCustomObject]@{ ProcessorQueueLength = $healthData.ProcessorQueueLength }; LastChecked = Get-Date; ErrorMessage = $null }
-    } catch { return [PSCustomObject]@{ IP = $IP; OSType = "Windows"; Status = "Error"; StatusColor = "Red"; ErrorMessage = $_.Exception.Message } }
+    } catch { 
+        Write-LogError -Message "Error in Get-WindowsServerHealth for $IP" -Component "HealthMonitor" -Exception $_
+        return [PSCustomObject]@{ IP = $IP; OSType = "Windows"; Status = "Error"; StatusColor = "Red"; ErrorMessage = $_.Exception.Message } 
+    }
 }
 
 <#
@@ -630,23 +737,18 @@ function Get-WindowsServerHealth {
 #>
 function Get-ContainerHealth {
     param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName = $null, [string]$OSType = $null)
+    Write-LogDebug -Message "Entering Get-ContainerHealth for IP: $IP" -Component "HealthMonitor"
     try {
         $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
-
-        # Single batch command: fetches container listing, inspect data, and stats in ONE SSH roundtrip
         $batchCommand = 'docker ps -a --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.Ports}}|{{.State}}" 2>/dev/null && echo "===INSPECT===" && (docker inspect --format "{{.ID}}|{{if .State.Health}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}|{{.RestartCount}}" $(docker ps -aq 2>/dev/null) 2>/dev/null || true) && echo "===STATS===" && (docker stats --no-stream --format "{{.ID}}|{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}" 2>/dev/null || true)'
-
         $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCommand -OSType $osType
         
-        # THE FIX: Plink and WSL return arrays of lines. Join them into a single multiline string 
-        # so the section markers split the massive block of text properly!
         $result = $result -join "`n"
-        
         if ($null -eq $result -or [string]::IsNullOrWhiteSpace($result)) {
+            Write-LogWarning -Message "Docker not accessible on $IP" -Component "HealthMonitor"
             return [PSCustomObject]@{ ServerIP = $IP; Status = "DockerNotAccessible"; StatusColor = "Red"; ErrorMessage = "Docker not accessible"; Containers = @() }
         }
-
-        # Parse sections
+        
         $sections = $result -split "===INSPECT==="
         $psOutput = $sections[0]
         
@@ -657,8 +759,7 @@ function Get-ContainerHealth {
             $inspectOutput = $subSections[0]
             if ($subSections.Count -gt 1) { $statsOutput = $subSections[1] }
         }
-
-        # Index inspection data by short container ID
+        
         $inspectMap = @{}
         foreach ($line in ($inspectOutput -split "`n")) {
             $p = $line.Trim() -split '\|'
@@ -667,8 +768,7 @@ function Get-ContainerHealth {
                 $inspectMap[$shortId] = @{ Health = $p[1].Trim(); Restarts = [int]($p[2].Trim() -as [int]) }
             }
         }
-
-        # Index stats data by short container ID
+        
         $statsMap = @{}
         foreach ($line in ($statsOutput -split "`n")) {
             $p = $line.Trim() -split '\|'
@@ -677,10 +777,9 @@ function Get-ContainerHealth {
                 $statsMap[$shortId] = @{ CPU = $p[1].Trim() -replace '%', ''; MemUsage = $p[2].Trim(); MemPerc = $p[3].Trim() -replace '%', '' }
             }
         }
-
+        
         $containers = @()
         $containerLines = $psOutput -split "`n" | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
-
         foreach ($line in $containerLines) {
             $parts = $line -split '\|'
             if ($parts.Count -lt 6) { continue }
@@ -693,11 +792,11 @@ function Get-ContainerHealth {
             $cState = $parts[5].Trim()
 
             if (-not [string]::IsNullOrEmpty($ContainerName) -and $cName -ne $ContainerName) { continue }
-
+            
             $shortId = $cId.Substring(0, [Math]::Min(12, $cId.Length))
             $insp = if ($inspectMap.ContainsKey($shortId)) { $inspectMap[$shortId] } else { @{ Health = "N/A"; Restarts = 0 } }
             $stat = if ($statsMap.ContainsKey($shortId)) { $statsMap[$shortId] } else { @{ CPU = $null; MemUsage = $null; MemPerc = $null } }
-
+            
             $containerStatusColor = "Green"
             if ($cState -ne "running" -or $insp.Health -eq "unhealthy") { $containerStatusColor = "Red" }
             elseif ($insp.Health -eq "starting" -or $insp.Restarts -gt 5) { $containerStatusColor = "Yellow" }
@@ -719,17 +818,20 @@ function Get-ContainerHealth {
                 StatusColor = $containerStatusColor 
             }
         }
-
+        
         $overallStatus = "Healthy"; $overallColor = "Green"
         $runningCount = ($containers | Where-Object { $_.State -eq "running" }).Count
         $totalCount = $containers.Count
         $unhealthyCount = ($containers | Where-Object { $_.HealthCheck -eq "unhealthy" -or $_.State -ne "running" }).Count
-
         if ($unhealthyCount -gt 0) { if ($runningCount -eq 0) { $overallStatus = "Critical"; $overallColor = "Red" } else { $overallStatus = "Warning"; $overallColor = "Yellow" } }
-
+        
+        Write-LogDebug -Message "Successfully parsed $($containers.Count) containers on $IP" -Component "HealthMonitor"
         return [PSCustomObject]@{ ServerIP = $IP; Status = $overallStatus; StatusColor = $overallColor; TotalContainers = $totalCount; RunningContainers = $runningCount; StoppedContainers = $totalCount - $runningCount; UnhealthyContainers = $unhealthyCount; ErrorMessage = $null; Containers = $containers; LastChecked = Get-Date }
     }
-    catch { return [PSCustomObject]@{ ServerIP = $IP; Status = "Error"; StatusColor = "Red"; TotalContainers = 0; RunningContainers = 0; StoppedContainers = 0; UnhealthyContainers = 0; ErrorMessage = $_.Exception.Message; Containers = @(); LastChecked = Get-Date } }
+    catch { 
+        Write-LogError -Message "Error in Get-ContainerHealth for $IP" -Component "HealthMonitor" -Exception $_
+        return [PSCustomObject]@{ ServerIP = $IP; Status = "Error"; StatusColor = "Red"; TotalContainers = 0; RunningContainers = 0; StoppedContainers = 0; UnhealthyContainers = 0; ErrorMessage = $_.Exception.Message; Containers = @(); LastChecked = Get-Date } 
+    }
 }
 
 <#
@@ -754,8 +856,17 @@ function Get-ContainerLogs {
 #>
 function Restart-Container {
     param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName)
-    $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker restart $ContainerName 2>&1 && echo 'RESTART_SUCCESS' || echo 'RESTART_FAILED'"
-    return ($result -match "RESTART_SUCCESS")
+    Write-LogDebug -Message "Entering Restart-Container for $ContainerName on $IP" -Component "DockerOps"
+    try {
+        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker restart $ContainerName 2>&1 && echo 'RESTART_SUCCESS' || echo 'RESTART_FAILED'"
+        $success = ($result -match "RESTART_SUCCESS")
+        if ($success) { Write-LogInfo -Message "Successfully restarted $ContainerName on $IP" -Component "DockerOps" }
+        else { Write-LogWarning -Message "Failed to restart $ContainerName on $IP" -Component "DockerOps" }
+        return $success
+    } catch {
+        Write-LogError -Message "Error in Restart-Container on $IP" -Component "DockerOps" -Exception $_
+        return $false
+    }
 }
 
 <#
@@ -764,8 +875,17 @@ function Restart-Container {
 #>
 function Stop-Container {
     param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName)
-    $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker stop $ContainerName 2>&1 && echo 'STOP_SUCCESS' || echo 'STOP_FAILED'"
-    return ($result -match "STOP_SUCCESS")
+    Write-LogDebug -Message "Entering Stop-Container for $ContainerName on $IP" -Component "DockerOps"
+    try {
+        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker stop $ContainerName 2>&1 && echo 'STOP_SUCCESS' || echo 'STOP_FAILED'"
+        $success = ($result -match "STOP_SUCCESS")
+        if ($success) { Write-LogInfo -Message "Successfully stopped $ContainerName on $IP" -Component "DockerOps" }
+        else { Write-LogWarning -Message "Failed to stop $ContainerName on $IP" -Component "DockerOps" }
+        return $success
+    } catch {
+        Write-LogError -Message "Error in Stop-Container on $IP" -Component "DockerOps" -Exception $_
+        return $false
+    }
 }
 
 <#
@@ -774,8 +894,17 @@ function Stop-Container {
 #>
 function Start-Container {
     param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName)
-    $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker start $ContainerName 2>&1 && echo 'START_SUCCESS' || echo 'START_FAILED'"
-    return ($result -match "START_SUCCESS")
+    Write-LogDebug -Message "Entering Start-Container for $ContainerName on $IP" -Component "DockerOps"
+    try {
+        $result = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker start $ContainerName 2>&1 && echo 'START_SUCCESS' || echo 'START_FAILED'"
+        $success = ($result -match "START_SUCCESS")
+        if ($success) { Write-LogInfo -Message "Successfully started $ContainerName on $IP" -Component "DockerOps" }
+        else { Write-LogWarning -Message "Failed to start $ContainerName on $IP" -Component "DockerOps" }
+        return $success
+    } catch {
+        Write-LogError -Message "Error in Start-Container on $IP" -Component "DockerOps" -Exception $_
+        return $false
+    }
 }
 
 <#
@@ -863,51 +992,60 @@ function Deploy-DockerService {
         [string]$ComposeContent,
         [string]$OSType = $null
     )
-    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
-    Write-Host "`nStarting $ServiceName deployment on $IP..." -ForegroundColor Cyan
-    
-    # 0. SMART FIX: Free up Port 53 from systemd-resolved if the config requires it
-    if ($ComposeContent -match '53:53') {
-        Write-Host "Port 53 detected in config. Freeing up port from systemd-resolved..." -ForegroundColor Yellow
-        $dnsFixCmd = "sudo mkdir -p /etc/systemd/resolved.conf.d && echo '[Resolve]' | sudo tee /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && echo 'DNSStubListener=no' | sudo tee -a /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && sudo systemctl restart systemd-resolved 2>/dev/null || true"
-        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $dnsFixCmd -OSType $os | Out-Null
-    }
-    
-    # 1. Map Directories
-    $dirCommand = "mkdir -p /home/$User/$ServiceName"
-    $matches = [regex]::Matches($ComposeContent, '-\s+"\./([^:]+):|-\s+\./([^:]+):')
-    $dirs = @()
-    foreach ($match in $matches) {
-        $val = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
-        if ($val -notmatch '\.(yml|yaml|json|txt|conf|ini|toml)$') { $dirs += $val }
-    }
-    $dirs = $dirs | Select-Object -Unique
-    foreach ($dir in $dirs) { $dirCommand += " /home/$User/$ServiceName/$dir" }
-    
-    $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($ComposeContent))
-    
-    # BATCHED: Executes directories, compose file, teardown, networking, and deployment in a single SSH stream
-    $batchCmd = "$dirCommand 2>/dev/null || true;"
-    $batchCmd += " cd /home/$User/$ServiceName;"
-    $batchCmd += " sudo docker compose down 2>/dev/null || true;"
-    $batchCmd += " echo '$composeBase64' | base64 -d > docker-compose.yml;"
-    if ($ComposeContent -match 'traefik-network') {
-        $batchCmd += " sudo docker network create traefik-network 2>/dev/null || true;"
-    }
-    $batchCmd += " sudo docker compose up -d 2>&1"
-    
-    Write-Host "Deploying $ServiceName with Docker Compose..." -ForegroundColor Cyan
-    $deployResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os
-    
-    # Verify status
-    Start-Sleep -Seconds 5
-    $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose ps" -OSType $os
-    
-    if ($verifyResult -match "Up|running") {
-        Write-Host "$ServiceName installed successfully!" -ForegroundColor Green
-        return $true
-    } else {
-        Write-Host "$ServiceName deployment failed. Output: $deployResult" -ForegroundColor Red
+    Write-LogDebug -Message "Entering Deploy-DockerService for $ServiceName on $IP" -Component "Deployment"
+    try {
+        $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+        Write-Host "`nStarting $ServiceName deployment on $IP..." -ForegroundColor Cyan
+        
+        # 0. SMART FIX: Free up Port 53 from systemd-resolved if the config requires it
+        if ($ComposeContent -match '53:53') {
+            Write-LogInfo -Message "Port 53 detected in config. Attempting systemd-resolved fix." -Component "Deployment"
+            Write-Host "Port 53 detected in config. Freeing up port from systemd-resolved..." -ForegroundColor Yellow
+            $dnsFixCmd = "sudo mkdir -p /etc/systemd/resolved.conf.d && echo '[Resolve]' | sudo tee /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && echo 'DNSStubListener=no' | sudo tee -a /etc/systemd/resolved.conf.d/adguard-fix.conf > /dev/null && sudo systemctl restart systemd-resolved 2>/dev/null || true"
+            Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $dnsFixCmd -OSType $os | Out-Null
+        }
+        
+        # 1. Map Directories
+        $dirCommand = "mkdir -p /home/$User/$ServiceName"
+        $matches = [regex]::Matches($ComposeContent, '-\s+"\./([^:]+):|-\s+\./([^:]+):')
+        $dirs = @()
+        foreach ($match in $matches) {
+            $val = if ($match.Groups[1].Success) { $match.Groups[1].Value } else { $match.Groups[2].Value }
+            if ($val -notmatch '\.(yml|yaml|json|txt|conf|ini|toml)$') { $dirs += $val }
+        }
+        $dirs = $dirs | Select-Object -Unique
+        foreach ($dir in $dirs) { $dirCommand += " /home/$User/$ServiceName/$dir" }
+        
+        $composeBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($ComposeContent))
+        
+        # BATCHED: Executes directories, compose file, teardown, networking, and deployment in a single SSH stream
+        $batchCmd = "$dirCommand 2>/dev/null || true;"
+        $batchCmd += " cd /home/$User/$ServiceName;"
+        $batchCmd += " sudo docker compose down 2>/dev/null || true;"
+        $batchCmd += " echo '$composeBase64' | base64 -d > docker-compose.yml;"
+        if ($ComposeContent -match 'traefik-network') {
+            $batchCmd += " sudo docker network create traefik-network 2>/dev/null || true;"
+        }
+        $batchCmd += " sudo docker compose up -d 2>&1"
+        
+        Write-Host "Deploying $ServiceName with Docker Compose..." -ForegroundColor Cyan
+        $deployResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os
+        
+        # Verify status
+        Start-Sleep -Seconds 5
+        $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "cd /home/$User/$ServiceName && sudo docker compose ps" -OSType $os
+        
+        if ($verifyResult -match "Up|running") {
+            Write-LogSuccess -Message "$ServiceName installed successfully on $IP" -Component "Deployment"
+            Write-Host "$ServiceName installed successfully!" -ForegroundColor Green
+            return $true
+        } else {
+            Write-LogWarning -Message "$ServiceName deployment failed on $IP. Output: $deployResult" -Component "Deployment"
+            Write-Host "$ServiceName deployment failed. Output: $deployResult" -ForegroundColor Red
+            return $false
+        }
+    } catch {
+        Write-LogError -Message "Error during Deploy-DockerService for $ServiceName on $IP" -Component "Deployment" -Exception $_
         return $false
     }
 }
@@ -921,11 +1059,14 @@ function Deploy-DockerService {
 #>
 function Install-Docker {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
-    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
-    
+    Write-LogDebug -Message "Entering Install-Docker for IP: $IP" -Component "Deployment"
     try {
+        $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
         $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
-        if ($null -ne $dockerCheck -and $dockerCheck -match "Docker version") { return $true }
+        if ($null -ne $dockerCheck -and $dockerCheck -match "Docker version") { 
+            Write-LogInfo -Message "Docker is already installed on $IP" -Component "Deployment"
+            return $true 
+        }
         
         # BATCHED INSTALL: Executes the entire Docker setup in a single SSH session
         $installCmd = "sudo apt-get update -y && sudo apt-get install -y ca-certificates curl && "
@@ -941,8 +1082,15 @@ function Install-Docker {
         Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $installCmd -OSType $os | Out-Null
         
         $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
-        return ($null -ne $verifyResult -and $verifyResult -match "Docker version")
-    } catch { return $false }
+        $success = ($null -ne $verifyResult -and $verifyResult -match "Docker version")
+        if ($success) { Write-LogSuccess -Message "Docker successfully installed on $IP" -Component "Deployment" }
+        else { Write-LogWarning -Message "Docker installation verification failed on $IP" -Component "Deployment" }
+        
+        return $success
+    } catch { 
+        Write-LogError -Message "Error during Install-Docker on $IP" -Component "Deployment" -Exception $_
+        return $false 
+    }
 }
 
 <#
@@ -955,9 +1103,10 @@ function Install-Docker {
 #>
 function Install-Traefik {
     param([string]$IP, [string]$User, [string]$Password, [string]$Email = "admin@localhost", [string]$Domain = "localhost", [string]$OSType = $null)
-    $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
-    
-    $traefikConfig = @"
+    Write-LogDebug -Message "Entering Install-Traefik for IP: $IP" -Component "Deployment"
+    try {
+        $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+        $traefikConfig = @"
 api:
   dashboard: true
   insecure: true
@@ -989,13 +1138,13 @@ certificatesResolvers:
 log:
   level: INFO
 "@
-    $configBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($traefikConfig))
-    
-    # BATCHED: Directory creation, acme.json setup, and yaml transfer in one call
-    $batchCmd = "mkdir -p /home/$User/traefik/letsencrypt && touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json && echo '$configBase64' | base64 -d > /home/$User/traefik/traefik.yml"
-    Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os | Out-Null
-
-    $compose = @"
+        $configBase64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($traefikConfig))
+        
+        # BATCHED: Directory creation, acme.json setup, and yaml transfer in one call
+        $batchCmd = "mkdir -p /home/$User/traefik/letsencrypt && touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json && echo '$configBase64' | base64 -d > /home/$User/traefik/traefik.yml"
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os | Out-Null
+        
+        $compose = @"
 services:
   traefik:
     image: traefik:latest
@@ -1015,7 +1164,13 @@ networks:
   traefik-network:
     external: true
 "@
-    return Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "traefik" -ComposeContent $compose -OSType $os
+        $result = Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "traefik" -ComposeContent $compose -OSType $os
+        if ($result) { Write-LogSuccess -Message "Traefik deployed successfully on $IP" -Component "Deployment" }
+        return $result
+    } catch {
+        Write-LogError -Message "Error during Install-Traefik on $IP" -Component "Deployment" -Exception $_
+        return $false
+    }
 }
 #endregion
 
@@ -1242,7 +1397,7 @@ function Invoke-WSL2Reboot {
 #===============================================================================
 
 Export-ModuleMember -Function @(
-    'Initialize-Logging', 'Write-Log', 'Write-LogDebug', 'Write-LogInfo', 'Write-LogWarning', 'Write-LogError', 'Write-LogSuccess', 'Get-LogFilePath', 'Get-LogContent', 'Clear-OldLogs', 'Write-SessionSeparator',
+    'Initialize-Logging', 'Set-LogConfiguration', 'Write-Log', 'Write-LogDebug', 'Write-LogInfo', 'Write-LogWarning', 'Write-LogError', 'Write-LogSuccess', 'Get-LogFilePath', 'Get-LogContent', 'Clear-OldLogs', 'Write-SessionSeparator',
     'Get-TargetOS', 'Test-SSHConnection', 'Test-WinRMConnection', 'Test-RemoteConnection', 'Invoke-WSLCommand', 'Invoke-RemoteCommand',
     'Get-ServerHealth', 'Get-LinuxServerHealth', 'Get-WindowsServerHealth', 'Get-ContainerHealth', 'Get-ContainerLogs', 'Restart-Container', 'Stop-Container', 'Start-Container', 'Get-FullHealthReport', 'Format-HealthReport', 'Test-ServiceHealth', 'Test-CommonServices',
     'Install-Docker', 'Install-Traefik', 'Deploy-DockerService',
