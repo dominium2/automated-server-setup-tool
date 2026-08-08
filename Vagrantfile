@@ -2,7 +2,6 @@
 # vi: set ft=ruby :
 
 Vagrant.configure("2") do |config|
-
   # Define 2 Linux (Debian) test servers
   (1..2).each do |i|
     config.vm.define "linux#{i}" do |server|
@@ -10,10 +9,10 @@ Vagrant.configure("2") do |config|
       server.vm.hostname = "linux#{i}"
       server.vm.network "private_network", ip: "192.168.56.#{10+i}"
       
-      server.vm.provider "virtualbox" do |vb|
-        vb.name = "HomeLab-Linux#{i}"
-        vb.memory = "1024"
-        vb.cpus = 1
+      server.vm.provider "hyperv" do |hv|
+        hv.vmname = "HomeLab-Linux#{i}"
+        hv.memory = "1024"
+        hv.cpus = 1
       end
       
       # Configure SSH and create test user
@@ -57,12 +56,12 @@ Vagrant.configure("2") do |config|
       # Increase boot timeout for Windows VMs
       server.vm.boot_timeout = 600
       
-      server.vm.provider "virtualbox" do |vb|
-        vb.name = "HomeLab-Windows#{i}"
-        vb.memory = "2048"
-        vb.cpus = 2
-        vb.gui = false
-        vb.customize ["modifyvm", :id, "--nested-hw-virt", "on"]
+      server.vm.provider "hyperv" do |hv|
+        hv.vmname = "HomeLab-Windows#{i}"
+        hv.memory = "3072" # Optimized for 16GB physical host
+        hv.cpus = 2
+        # Explicitly enable nested hardware virtualization in Hyper-V
+        hv.enable_virtualization_extensions = true
       end
       
       # Configure WinRM

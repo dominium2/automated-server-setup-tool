@@ -29,11 +29,10 @@ The backend has been heavily optimized with command batching and OS-detection ca
 - **Portainer**: Docker container management.
 
 ## Supported Operating Systems
-
 - Debian-based Linux distributions (Ubuntu, Debian, Linux Mint, etc.)
 - Windows 11 (with WSL2)
 
-*Note: Windows setup will not work on virtual machines because WSL2 cannot be installed in a VM (it requires nested virtualization which is often unavailable or unsupported).*
+*Note: Testing the Windows 11 WSL2 deployment inside a virtual machine explicitly requires a Type-1 hypervisor like **Microsoft Hyper-V**. Type-2 hypervisors like VirtualBox fail to properly pass through the nested SLAT/EPT hardware virtualization instructions required for WSL2 to initialize, which will cause the automated Docker installation to fail. See `TESTING.md` for architectural details.*
 
 ## Prerequisites
 

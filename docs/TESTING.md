@@ -23,25 +23,29 @@ Our unit tests utilize Pester's `Mock` feature. This intercepts network commands
 
 ## 2. Integration Testing (Requires Virtual Machines)
 
-Integration tests perform actual end-to-end deployments against live virtual machines. This ensures that the generated bash scripts, Docker installation sequences, and Traefik proxy networking behave correctly in a real-world environment.
+# Testing with VMs
 
-### Prerequisites
-1. Install VirtualBox
+## Why Hyper-V Instead of VirtualBox?
+Testing Windows WSL2 automation inside a virtual machine requires **Nested Virtualization**. The guest VM must act as a hypervisor itself to spin up the tiny Linux utility VM that powers WSL2.
 
-2. Install Vagrant
+VirtualBox (a Type-2 hypervisor) struggles to translate the deep CPU instructions (SLAT/EPT) required for this. By switching to **Hyper-V** (a Type-1 hypervisor), the SLAT/EPT instructions are passed through directly to the guest via the `enable_virtualization_extensions` flag, allowing WSL2 to unpack its kernel and run Docker seamlessly.
 
-### Starting the Test VMs
+## Prerequisites
+1. **Enable Hyper-V on your Host Machine**: Open Administrator PowerShell and run:
+   `Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All`
+   *(You must restart your computer if this feature was just enabled).*
+2. **Install Vagrant**: https://www.vagrantup.com/downloads
 
+## Starting Test VMs
 ```powershell
 # Navigate to project directory
 cd automated-server-setup-tool
 
-# Start the test servers (takes 5-10 minutes the first time)
-vagrant up
+# Start all test servers using the Hyper-V provider
+vagrant up --provider hyperv
 
 # Check status
 vagrant status
-```
 
 This provisions test servers (e.g., Debian at `192.168.56.11`). All servers use:
 - **Username**: `testuser`
@@ -53,15 +57,45 @@ Once the VMs are completely booted and running:
 ```powershell
 Invoke-Pester -Path .\tests\Portainer-Integration.Tests.ps1
 ```
-### Useful Vagrant Commands
-
+## Useful Vagrant Commands
 ```powershell
+# Start all VMs using Hyper-V
+vagrant up --provider hyperv
+
+# Start specific VM
+vagrant up windows1 --provider hyperv
+
 # Stop all VMs
 vagrant halt
 
 # Delete all VMs (free up space)
 vagrant destroy -f
 
-# SSH directly into a VM to verify containers manually
+# SSH into a Linux VM
 vagrant ssh linux1
-```
+
+# Open Remote PowerShell into a Windows VM
+vagrant powershell windows1
+
+# Check VM status
+vagrant status
+
+## Troubleshooting
+**VMs won't start (Not enough memory error):**
+- Hyper-V requires contiguous memory blocks. If you see `0x800705AA` or `0x8007000E`, close heavy background applications (browsers, IDEs) on your physical host machine to free up RAM, then retry `vagrant up`.
+
+**Can't ping VMs:**
+- Ensure the Hyper-V Virtual Switch was created correctly. When Vagrant prompts you for a network interface during the first boot, ensure you select the "Default Switch".
+
+**WSL2 Installation fails inside Windows VM:**
+- Confirm you are using `--provider hyperv`. If `wsl --install` throws errors, ensure the VM has fully rebooted after the initial deployment to allow the inner hypervisor to activate.
+
+## Snapshot VMs (Save State)
+Because Vagrant with Hyper-V utilizes native Windows checkpoints, you can save clean states directly using PowerShell:
+
+```powershell
+# Take a snapshot of a clean VM state
+Checkpoint-VM -Name "HomeLab-Windows1" -SnapshotName "clean-state"
+
+# Restore the VM to the clean state
+Restore-VMSnapshot -VMName "HomeLab-Windows1" -Name "clean-state"
