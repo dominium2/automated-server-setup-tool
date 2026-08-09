@@ -1071,9 +1071,49 @@ function Deploy-DockerService {
 
 <#
 .SYNOPSIS
-    Automated Docker Engine installer.
+    Automated Docker Engine installer for native Linux servers.
 #>
-function Install-Docker {
+function Install-DockerLinux {
+    param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
+    Write-LogDebug -Message "Entering Install-Docker for IP: $IP" -Component "Deployment"
+    try {
+        $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+        $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
+        if ($null -ne $dockerCheck -and $dockerCheck -match "Docker version") { 
+            Write-LogInfo -Message "Docker is already installed on $IP" -Component "Deployment"
+            return $true 
+        }
+        
+        # BATCHED INSTALL: Executes the entire Docker setup in a single SSH session
+        $installCmd = "sudo apt-get update -y && sudo apt-get install -y ca-certificates curl && "
+        $installCmd += "sudo install -m 0755 -d /etc/apt/keyrings && "
+        $installCmd += "OS_ID=`$(. /etc/os-release && echo `$ID) && "
+        $installCmd += "OS_CODE=`$(. /etc/os-release && echo `$VERSION_CODENAME) && "
+        $installCmd += "sudo curl -fsSL https://download.docker.com/linux/`$OS_ID/gpg -o /etc/apt/keyrings/docker.asc && "
+        $installCmd += "sudo chmod a+r /etc/apt/keyrings/docker.asc && sudo rm -f /etc/apt/sources.list.d/docker.list /etc/apt/sources.list.d/docker.sources && "
+        $installCmd += "echo `"Types: deb`nURIs: https://download.docker.com/linux/`$OS_ID`nSuites: `$OS_CODE`nComponents: stable`nSigned-By: /etc/apt/keyrings/docker.asc`" | sudo tee /etc/apt/sources.list.d/docker.sources > /dev/null && "
+        $installCmd += "sudo apt-get update -y && sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin && "
+        $installCmd += "sudo systemctl start docker && sudo systemctl enable docker && sudo usermod -aG docker $User"
+        
+        Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $installCmd -OSType $os | Out-Null
+        
+        $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
+        $success = ($null -ne $verifyResult -and $verifyResult -match "Docker version")
+        if ($success) { Write-LogSuccess -Message "Docker successfully installed on $IP" -Component "Deployment" }
+        else { Write-LogWarning -Message "Docker installation verification failed on $IP" -Component "Deployment" }
+        
+        return $success
+    } catch { 
+        Write-LogError -Message "Error during Install-Docker on $IP" -Component "Deployment" -Exception $_
+        return $false 
+    }
+}
+
+<#
+.SYNOPSIS
+    Automated Docker Engine installer for WSL2 environments.
+#>
+function Install-DockerWSL2 {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
     Write-LogDebug -Message "Entering Install-Docker for IP: $IP" -Component "Deployment"
     try {
@@ -1542,7 +1582,7 @@ Export-ModuleMember -Function @(
     'Initialize-Logging', 'Set-LogConfiguration', 'Write-Log', 'Write-LogDebug', 'Write-LogInfo', 'Write-LogWarning', 'Write-LogError', 'Write-LogSuccess', 'Get-LogFilePath', 'Get-LogContent', 'Clear-OldLogs', 'Write-SessionSeparator',
     'Get-TargetOS', 'Test-SSHConnection', 'Test-WinRMConnection', 'Test-RemoteConnection', 'Invoke-WSLCommand', 'Invoke-RemoteCommand',
     'Get-ServerHealth', 'Get-LinuxServerHealth', 'Get-WindowsServerHealth', 'Get-ContainerHealth', 'Get-ContainerLogs', 'Restart-Container', 'Stop-Container', 'Start-Container', 'Get-FullHealthReport', 'Format-HealthReport', 'Test-ServiceHealth', 'Test-CommonServices',
-    'Install-Docker', 'Install-Traefik', 'Deploy-DockerService',
+    'Install-DockerLinux', 'Install-DockerWSL2', 'Install-Traefik', 'Deploy-DockerService',
     'Test-WSLReady', 'Install-WSL2', 'Invoke-WSL2Reboot', 'Set-ConnectionConfig'
 )
 #endregion

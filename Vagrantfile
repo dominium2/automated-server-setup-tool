@@ -9,10 +9,10 @@ Vagrant.configure("2") do |config|
       server.vm.hostname = "linux#{i}"
       server.vm.network "private_network", ip: "192.168.56.#{10+i}"
       
-      server.vm.provider "hyperv" do |hv|
-        hv.vmname = "HomeLab-Linux#{i}"
-        hv.memory = "1024"
-        hv.cpus = 1
+      server.vm.provider "virtualbox" do |vb|
+        vb.name = "HomeLab-Linux#{i}"
+        vb.memory = 1024
+        vb.cpus = 1
       end
       
       # Configure SSH and create test user
