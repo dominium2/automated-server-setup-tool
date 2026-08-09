@@ -1,46 +1,57 @@
-# RMSetup.psm1 Documentation
+# RMSetup Module Overview
 
-`RMSetup.psm1` is the consolidated backend engine. It handles cross-platform remote execution, network port routing, batched Docker deployments, and string parsing.
+This module abstracts the complexity of remote server operations. It acts as a routing layer that decides whether a target is Linux or Windows, establishes the appropriate connection, executes the requested command, and normalizes the results.
 
-## Connection Architecture
+## Backend Execution Flow
 
-### 1. `Set-ConnectionConfig`
-Stores user-defined SSH and WinRM ports in the module's script scope (`$script:SSHPort`, `$script:WinRMPort`). This entirely eliminates the need to pass port parameters through dozens of nested functions.
+1. **Configuration Sync**
+   - The GUI passes custom SSH and WinRM ports into the module scope through `Set-ConnectionConfig`.
 
-### 2. Smart OS Detection & Caching (`Get-TargetOS`)
-Probes TCP ports (WinRM 5985 and SSH 22) to determine the target OS. To prevent network overhead, the result is cached and passed down using the `-OSType` parameter. This prevents the module from executing 2-second timeout probes during subsequent bash operations.
+2. **Operating System Detection**
+   - `Get-TargetOS` tests the available ports and uses TTL-based fallback logic to determine whether the target is Windows or Linux.
 
-### 3. `Invoke-RemoteCommand`
-The universal transport layer. 
-- **Linux**: Wraps `plink` (PuTTY) to bypass OpenSSH's strict interactive-password limitations, allowing fully automated deployments.
-- **Windows**: Wraps `Invoke-WSLCommand` to route commands directly into the target's WSL2 Ubuntu distribution.
+3. **Command Routing**
+   - `Invoke-RemoteCommand` routes bash-based work to PuTTY or WSL depending on the detected OS.
 
-## High-Speed Command Batching
+4. **Action Execution**
+   - Higher-level functions such as `Deploy-DockerService` build optimized batched commands to reduce network round-trips and speed up deployment.
 
-Previous iterations opened a new SSH connection for every single Linux command, causing setups to take up to 10 minutes. The architecture now relies on **Bash Chaining** to execute massive workloads in a single remote session.
+## Core Module Areas
 
-### `Deploy-DockerService` Batching
-Calculates required directories, translates YAML into Base64, and constructs a single string payload:
-```bash
-mkdir -p /home/user/app/data; cd /home/user/app; sudo docker compose down; echo 'base64...' | base64 -d > docker-compose.yml; sudo docker compose up -d
-```
-This reduces deployment execution from minutes to roughly ~15 seconds per server.
+### 1. Configuration and Logging
 
-`Get-ContainerHealth` Batching
-Uses inline bash subshells and section headers (`===INSPECT===`, `===STATS===`) to run `docker ps`, `docker inspect`, and `docker stats` concurrently across all containers in one payload.
-The PowerShell backend then splits the massive returned string, indexing the data by short container IDs, dropping polling times from 5 minutes to 3 seconds.
+- `Set-ConnectionConfig`: Stores the configured SSH and WinRM ports globally for reuse.
+- `Initialize-Logging`: Creates a timestamped log file under the `logs/` directory.
+- `Invoke-LogRotation`: Rotates or removes old log files when they exceed size or count thresholds.
+- `Write-Log` and wrappers like `Write-LogInfo`/`Write-LogError`: Record messages with timestamps and severity levels.
+- `Set-LogConfiguration`: Passes the active log path into background runspaces to keep logging consistent.
 
-## Service Installation
+### 2. Remote Connection Routing
 
-All services (Docker, Traefik, AdGuard, Portainer, etc.) follow an idempotent design:
+- `Get-TargetOS`: Detects the remote operating system using port checks and fallback ping logic.
+- `Test-SSHConnection` and `Test-WinRMConnection`: Validate direct connectivity for each protocol.
+- `Test-RemoteConnection`: Runs a short validation sequence to confirm the target is reachable and supports the expected protocol.
+- `Invoke-WSLCommand`: Executes bash payloads on Windows hosts through WSL.
+- `Invoke-RemoteCommand`: The primary dispatcher for remote execution.
 
-1. Validate dependencies.
-2. Resolve environment conflicts (e.g., auto-disabling `systemd-resolved` for AdGuard's DNS port 53).
-3. Execute the batched payload.
-4. Verify the container state returns `running` or `Up`.
+### 3. Health Monitoring and Parsers
 
-## Health Reporting
+- `Get-ServerHealth`: Routes to the correct OS-specific health check.
+- `Get-LinuxServerHealth`: Collects CPU, RAM, disk, and uptime data over SSH.
+- `Get-WindowsServerHealth`: Queries WMI over WinRM for host metrics.
+- `Get-ContainerHealth`: Retrieves Docker container status and resource usage in a single pass.
+- `Restart-Container`, `Stop-Container`, and `Start-Container`: Wrap docker lifecycle operations.
+- `Get-FullHealthReport` and `Format-HealthReport`: Combine host and container data into a human-readable report.
 
-1. `Get-LinuxServerHealth`: Uses native Linux binaries (`top`, `free`, `df`, `uptime`) to extract host resource usage.
-2. `Get-WindowsServerHealth`: Uses `Get-CimInstance` over WinRM PSSessions to extract host resource usage.
-3. `Format-HealthReport`: Converts raw `[PSCustomObject]` properties into a clean, human-readable terminal output for exporting.
+### 4. Service Installation Algorithms
+
+- `Deploy-DockerService`: Performs the deployment workflow, including dependency checks, compose file handling, stack teardown, and container startup.
+- `Install-DockerLinux`: Installs Docker CE on Debian or Ubuntu hosts.
+- `Install-DockerWSL2`: Configures Docker inside WSL2 with memory and CPU limits.
+- `Install-Traefik`: Deploys Traefik and ensures the `acme.json` file has the correct permissions.
+
+### 5. WSL2 Infrastructure
+
+- `Test-WSLReady`: Checks whether Hyper-V, Virtual Machine Platform, WSL, and a distribution are available on the Windows host.
+- `Install-WSL2`: Installs and configures WSL2 and its Linux distribution.
+- `Invoke-WSL2Reboot`: Reboots the host when required to finish feature activation.

@@ -1,84 +1,114 @@
-# Automated Home Lab Setup Tool
+# 🚀 Automated Home Lab Setup Tool
 
-A PowerShell-based automation tool with GUI for deploying and managing services across multiple servers simultaneously. Simplify your home lab setup with automatic OS detection, Docker deployment, Traefik reverse proxy configuration, and interactive container management.
+A high-performance, multithreaded PowerShell orchestration tool with a rich WPF-based graphical interface. It automates the deployment, configuration, and monitoring of Dockerized services across multiple servers and virtual machines.
 
-## Overview
+By combining SSH and WinRM execution with parallel runspaces, the tool can orchestrate multi-server deployments much faster than a sequential workflow.
 
-This tool eliminates the repetitive and time-consuming process of setting up services across multiple servers. Through an intuitive WPF interface, you can configure multiple servers and deploy services like AdGuard, N8N, Heimdall, Crafty, and Portainer with just a few clicks. 
+---
 
-The backend has been heavily optimized with command batching and OS-detection caching, reducing deployment and monitoring times from minutes down to seconds.
+## ✨ Key Features
 
-## Key Features
+- **Parallel execution**: Deploy to multiple servers at once without freezing the interface.
+- **Automatic OS detection**: Identify Linux and Windows targets and route commands to the correct protocol.
+- **Zero-touch Docker provisioning**:
+  - **Linux**: install Docker Engine and required repositories automatically.
+  - **Windows**: configure WSL2, provision a Linux user, and install Docker inside the WSL environment.
+- **Health dashboard**: Monitor CPU, memory, disk, uptime, and container state from the UI.
+- **Traefik integration**: Deploy reverse proxy services and handle certificate-related file permissions automatically.
+- **Port 53 conflict resolution**: Detect and resolve DNS stub conflicts for services like AdGuard Home.
 
-- **Intuitive GUI**: WPF-based interface with tabbed server management.
-- **Parallel Execution**: Deploy to multiple servers simultaneously.
-- **Ultra-Fast Operations**: SSH command batching reduces setup times to ~30 seconds and health monitoring to under 5 seconds.
-- **Custom Connection Configurations**: Define custom SSH and WinRM ports per server directly in the GUI.
-- **Automatic OS Detection**: Supports Debian-based Linux and Windows 11, with smart caching to eliminate redundant network probes.
-- **Interactive Health Monitoring**: Real-time server metrics and actionable container cards (Start, Stop, Restart directly from the UI).
-- **Docker Automation**: Automatic Docker/WSL2 installation and configuration.
-- **Traefik Integration**: Automatic reverse proxy setup with port conflict prevention.
-- **Comprehensive Logging**: Per-server logging with exportable error reports and auto-rotation.
+---
 
-## Supported Services (MVP)
+## 📋 Prerequisites
 
-- **AdGuard Home**: Network-wide ad blocking (includes automatic systemd-resolved port 53 conflict resolution).
-- **N8N**: Workflow automation platform.
-- **Crafty Controller**: Minecraft server management.
-- **Heimdall**: Application dashboard.
-- **Portainer**: Docker container management.
+### Host machine
 
-## Supported Operating Systems
-- Debian-based Linux distributions (Ubuntu, Debian, Linux Mint, etc.)
-- Windows 11 (with WSL2)
+- Windows 10 or 11 with PowerShell 5.1 or newer
+- Administrator privileges
+- PuTTY with `plink.exe` available in your `PATH`
 
-*Note: Testing the Windows 11 WSL2 deployment inside a virtual machine explicitly requires a Type-1 hypervisor like **Microsoft Hyper-V**. Type-2 hypervisors like VirtualBox fail to properly pass through the nested SLAT/EPT hardware virtualization instructions required for WSL2 to initialize, which will cause the automated Docker installation to fail. See `TESTING.md` for architectural details.*
+Install PuTTY with:
 
-## Prerequisites
+```powershell
+choco install putty -y
+```
 
-- PowerShell 5.1 or later
-- Administrator/root privileges on target servers
-- Internet connection on all servers
-- Target servers must allow remote connections (SSH for Linux, WinRM for Windows)
-- `plink` (PuTTY) installed on the host machine for password-based SSH automation (`choco install putty -y`)
+### Target machines
 
-## Installation
+- **Linux targets**: Debian-based systems with SSH enabled
+- **Windows targets**: Windows 10/11 with WinRM enabled
+- **Note**: Windows targets must support hardware virtualization for WSL2-based deployment
 
-1. Clone this repository:
-   ```powershell
-   git clone [https://github.com/dominium2/automated-server-setup-tool.git](https://github.com/dominium2/automated-server-setup-tool.git)
-   cd automated-server-setup-tool
-   ```
-2. Run PowerShell as Administrator.
+---
 
-3. Set execution policy if needed
-   ```powershell
-   Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
-   ```
-## Usage
+## ⚙️ Installation and Quick Start
 
-1. Launch the tool by running `GUI.ps1`
+### 1. Clone the repository
 
-2. Click "Add Server" to create a new server configuration block.
+```powershell
+git clone https://github.com/yourusername/automated-server-setup-tool.git
+cd automated-server-setup-tool
+```
 
-3. Fill in the server details:
-   - **IP Address**: Server IP or hostname.
-   - **Credentials**: Username and password.
-   - **Service**: Select from the dynamically loaded dropdown.
-   - **Connection Ports**: Modify SSH or WinRM ports if your server uses non-standard configurations.
+### 2. Set PowerShell execution policy
 
-4. Click **"Run Setup"** to start the automated parallel deployment.
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
 
-5. Click **"Health Monitor"** at any time to view live resource usage and manage running containers.
+### 3. Launch the application
 
-## Architecture
+Run the GUI as Administrator:
 
-The tool follows a modular design pattern:
+```powershell
+.\GUI.ps1
+```
 
-- **UI Layer** (GUI.ps1): WPF-based GUI for user interaction, validation, and threaded parallel runspaces.
-- **Module Layer** (RMSetup.psm1): Consolidated backend logic handling remote execution, OS detection, logging, and health polling.
-- **Service Layer** (configs/services/): Docker Compose YAML templates for each service.
+---
 
-## Testing
+## 🖥️ Using the Interface
 
-See the `TESTING.md` file for instructions on running the mocked Pester unit tests (which execute in milliseconds without VMs) and the live Vagrant integration tests.
+### 1. Add servers
+
+- Click **Add Server** to create a new configuration block.
+- Enter the target IP address or hostname.
+- Provide the username and password for the server.
+- Select the service to deploy.
+- Optionally enable Traefik and adjust SSH or WinRM ports.
+
+### 2. Manage services
+
+- Open **Manage Services** to edit Docker Compose templates.
+- Create or update service definitions in the [configs/services](configs/services) directory.
+- Saved files will appear in the service dropdown automatically.
+
+### 3. Deploy
+
+- Click **Run Setup** to begin orchestration.
+- The tool validates your inputs, pings the targets, and shows live output in the terminal area.
+- Use **Simple** mode for a concise summary or **Advanced** mode for detailed command output.
+
+### 4. Monitor health
+
+- Open **Health Monitor** to view server and container health.
+- Review CPU, memory, disk, and uptime information.
+- Start, stop, or restart containers directly from the dashboard.
+- Export a full text report for auditing or troubleshooting.
+
+---
+
+## 🏗️ Architecture Overview
+
+The project is split into three main layers:
+
+- [GUI.ps1](GUI.ps1): presentation layer for the WPF UI, validation, and runspace-based orchestration
+- [modules/RMSetup.psm1](modules/RMSetup.psm1): logic layer for remote connection handling, command execution, and deployment logic
+- [configs/services](configs/services): storage for Docker Compose YAML service templates
+
+---
+
+## ⚠️ Known Limitations and Troubleshooting
+
+- **Nested virtualization**: WSL2 deployment on a Windows virtual machine may fail unless nested virtualization is enabled in the hypervisor.
+- **WinRM interruptions**: Windows deployments can occasionally interrupt the monitoring pipeline, especially when the WSL kernel is being installed.
+- **Logs**: Check the [logs](logs) directory if a deployment fails silently. The tool writes timestamped log files to help with diagnostics.
