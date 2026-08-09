@@ -331,10 +331,10 @@ function Get-AllServerConfigs {
 #>
 function Test-IPAddress {
     param([string]$IP)
-    Write-LogDebug -Message "Entering Test-IPAddress for: $IP" -Component "GUI"
+    if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Entering Test-IPAddress for: $IP" -Component "GUI" }
     
     if ([string]::IsNullOrWhiteSpace($IP)) {
-        Write-LogDebug -Message "IP Address string is empty or null." -Component "GUI"
+        if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "IP Address string is empty or null." -Component "GUI" }
         return $false
     }
     
@@ -343,7 +343,7 @@ function Test-IPAddress {
         if ($ipObj.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
             $octets = $IP.Split('.')
             if ($octets.Count -eq 4) {
-                Write-LogDebug -Message "Validated $IP as correct IPv4 format." -Component "GUI"
+                if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Validated $IP as correct IPv4 format." -Component "GUI" }
                 return $true
             }
         }
@@ -355,12 +355,12 @@ function Test-IPAddress {
     $hostnamePattern = '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
     if ($IP -match $hostnamePattern) {
         if ($IP -notmatch '^\d+(\.\d+)*$') {
-            Write-LogDebug -Message "Validated $IP as correct hostname format." -Component "GUI"
+            if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Validated $IP as correct hostname format." -Component "GUI" }
             return $true
         }
     }
     
-    Write-LogDebug -Message "Failed validation for: $IP" -Component "GUI"
+    if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Failed validation for: $IP" -Component "GUI" }
     return $false
 }
 
@@ -378,7 +378,7 @@ function Test-IPAddress {
 #>
 function Test-ServerConfigs {
     param($Configs)
-    Write-LogDebug -Message "Entering Test-ServerConfigs to validate inputs." -Component "GUI"
+    if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Entering Test-ServerConfigs to validate inputs." -Component "GUI" }
     try {
         $validationErrors = @()
         foreach ($config in $Configs) {
@@ -393,10 +393,10 @@ function Test-ServerConfigs {
             if ($config.EnableSSH -and ($config.SSHPort -le 0 -or $config.SSHPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid SSH Port" }
             if ($config.EnableWinRM -and ($config.WinRMPort -le 0 -or $config.WinRMPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid WinRM Port" }
         }
-        Write-LogDebug -Message "Test-ServerConfigs completed with $($validationErrors.Count) errors." -Component "GUI"
+        if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Test-ServerConfigs completed with $($validationErrors.Count) errors." -Component "GUI" }
         return $validationErrors
     } catch {
-        Write-LogError -Message "Error during Test-ServerConfigs validation." -Component "GUI" -Exception $_
+        if (Get-Command Write-LogError -ErrorAction SilentlyContinue) { Write-LogError -Message "Error during Test-ServerConfigs validation." -Component "GUI" -Exception $_ }
         return @("Critical validation processing error: $($_.Exception.Message)")
     }
 }
