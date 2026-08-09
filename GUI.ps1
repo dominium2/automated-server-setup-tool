@@ -32,6 +32,7 @@ services:
       - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
       - "traefik.http.services.portainer.loadbalancer.server.port=9443"
       - "traefik.http.services.portainer.loadbalancer.server.scheme=https"
+
 networks:
   traefik-network:
     external: true
@@ -330,10 +331,10 @@ function Get-AllServerConfigs {
 #>
 function Test-IPAddress {
     param([string]$IP)
-    Write-LogDebug -Message "Entering Test-IPAddress for: $IP" -Component "GUI"
+    if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Entering Test-IPAddress for: $IP" -Component "GUI" }
     
     if ([string]::IsNullOrWhiteSpace($IP)) {
-        Write-LogDebug -Message "IP Address string is empty or null." -Component "GUI"
+        if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "IP Address string is empty or null." -Component "GUI" }
         return $false
     }
     
@@ -342,7 +343,7 @@ function Test-IPAddress {
         if ($ipObj.AddressFamily -eq [System.Net.Sockets.AddressFamily]::InterNetwork) {
             $octets = $IP.Split('.')
             if ($octets.Count -eq 4) {
-                Write-LogDebug -Message "Validated $IP as correct IPv4 format." -Component "GUI"
+                if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Validated $IP as correct IPv4 format." -Component "GUI" }
                 return $true
             }
         }
@@ -354,12 +355,12 @@ function Test-IPAddress {
     $hostnamePattern = '^[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?)*$'
     if ($IP -match $hostnamePattern) {
         if ($IP -notmatch '^\d+(\.\d+)*$') {
-            Write-LogDebug -Message "Validated $IP as correct hostname format." -Component "GUI"
+            if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Validated $IP as correct hostname format." -Component "GUI" }
             return $true
         }
     }
     
-    Write-LogDebug -Message "Failed validation for: $IP" -Component "GUI"
+    if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Failed validation for: $IP" -Component "GUI" }
     return $false
 }
 
@@ -377,7 +378,7 @@ function Test-IPAddress {
 #>
 function Test-ServerConfigs {
     param($Configs)
-    Write-LogDebug -Message "Entering Test-ServerConfigs to validate inputs." -Component "GUI"
+    if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Entering Test-ServerConfigs to validate inputs." -Component "GUI" }
     try {
         $validationErrors = @()
         foreach ($config in $Configs) {
@@ -392,10 +393,10 @@ function Test-ServerConfigs {
             if ($config.EnableSSH -and ($config.SSHPort -le 0 -or $config.SSHPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid SSH Port" }
             if ($config.EnableWinRM -and ($config.WinRMPort -le 0 -or $config.WinRMPort -gt 65535)) { $validationErrors += "Server $($serverNum): Invalid WinRM Port" }
         }
-        Write-LogDebug -Message "Test-ServerConfigs completed with $($validationErrors.Count) errors." -Component "GUI"
+        if (Get-Command Write-LogDebug -ErrorAction SilentlyContinue) { Write-LogDebug -Message "Test-ServerConfigs completed with $($validationErrors.Count) errors." -Component "GUI" }
         return $validationErrors
     } catch {
-        Write-LogError -Message "Error during Test-ServerConfigs validation." -Component "GUI" -Exception $_
+        if (Get-Command Write-LogError -ErrorAction SilentlyContinue) { Write-LogError -Message "Error during Test-ServerConfigs validation." -Component "GUI" -Exception $_ }
         return @("Critical validation processing error: $($_.Exception.Message)")
     }
 }
@@ -476,7 +477,7 @@ function Show-HealthMonitorWindow {
         
         <!-- Control Bar -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button Name="RefreshButton" Content="  Refresh All" Width="120" Height="30" Margin="0,0,10,0" FontSize="12"/>
+            <Button Name="RefreshButton" Content="🔄 Refresh All" Width="120" Height="30" Margin="0,0,10,0" FontSize="12"/>
             <Button Name="AutoRefreshButton" Content="Auto-Refresh: OFF" Width="140" Height="30" Margin="0,0,10,0" FontSize="12"/>
             <Label Content="Interval:" VerticalAlignment="Center" Margin="10,0,5,0"/>
             <ComboBox Name="RefreshIntervalCombo" Width="80" Height="30" VerticalAlignment="Center">
@@ -832,6 +833,7 @@ function Show-HealthMonitorWindow {
                 [System.Windows.Controls.Grid]::SetColumn($actionPanel, 3)
                 
                 $tagData = @{ Config = $ServerConfig; ContainerName = $container.Name }
+                
                 $btnStart = New-Object System.Windows.Controls.Button
                 $btnStart.Content = "▶"
                 $btnStart.ToolTip = "Start Container"
@@ -849,9 +851,9 @@ function Show-HealthMonitorWindow {
                     if ($res) { $statusBarText.Text = "Started $($data.ContainerName)." } else { $statusBarText.Text = "Failed to start $($data.ContainerName)." }
                     Refresh-HealthData
                 })
-
+                
                 $btnStop = New-Object System.Windows.Controls.Button
-                $btnStop.Content = "■"
+                $btnStop.Content = "⏹"
                 $btnStop.ToolTip = "Stop Container"
                 $btnStop.Width = 30
                 $btnStop.Height = 22
@@ -867,7 +869,7 @@ function Show-HealthMonitorWindow {
                     if ($res) { $statusBarText.Text = "Stopped $($data.ContainerName)." } else { $statusBarText.Text = "Failed to stop $($data.ContainerName)." }
                     Refresh-HealthData
                 })
-
+                
                 $btnRestart = New-Object System.Windows.Controls.Button
                 $btnRestart.Content = "↻"
                 $btnRestart.ToolTip = "Restart Container"
@@ -884,7 +886,7 @@ function Show-HealthMonitorWindow {
                     if ($res) { $statusBarText.Text = "Restarted $($data.ContainerName)." } else { $statusBarText.Text = "Failed to restart $($data.ContainerName)." }
                     Refresh-HealthData
                 })
-
+                
                 [void]$actionPanel.Children.Add($btnStart)
                 [void]$actionPanel.Children.Add($btnStop)
                 [void]$actionPanel.Children.Add($btnRestart)
@@ -927,7 +929,7 @@ function Show-HealthMonitorWindow {
         
         $script:healthRefreshInProgress = $true
         $refreshButton.IsEnabled = $false
-        $refreshButton.Content = "  Refreshing..."
+        $refreshButton.Content = "⏳ Refreshing..."
         $statusBarText.Text = "Refreshing health data in background..."
         
         # Show loading indicators
@@ -1146,12 +1148,12 @@ function Show-HealthMonitorWindow {
                 }
                 
                 # Update summary
-                $summaryText.Text = "Servers: $($ServerConfigs.Count) |   Healthy: $healthyCount |   Warning: $warningCount |   Critical: $criticalCount | Last Updated: $(Get-Date -Format 'HH:mm:ss')"
+                $summaryText.Text = "Servers: $($ServerConfigs.Count) | 🟢 Healthy: $healthyCount | 🟡 Warning: $warningCount | 🔴 Critical: $criticalCount | Last Updated: $(Get-Date -Format 'HH:mm:ss')"
                 $statusBarText.Text = "Ready - Last refresh: $(Get-Date -Format 'HH:mm:ss')"
                 
                 # Re-enable button
                 $refreshButton.IsEnabled = $true
-                $refreshButton.Content = "  Refresh All"
+                $refreshButton.Content = "🔄 Refresh All"
                 $script:healthRefreshInProgress = $false
                 
                 Write-LogInfo -Message "Health data refreshed for $($script:healthResults.Count) server(s)" -Component "HealthMonitor"
@@ -1289,7 +1291,7 @@ function Show-HealthMonitorWindow {
                         if ($line -match "Healthy|SUCCESS|running") { $color = "Green" }
                         elseif ($line -match "Critical|Error|FAILED|stopped") { $color = "Red" }
                         elseif ($line -match "Warning|Degraded") { $color = "Yellow" }
-                        elseif ($line -match " ") { $color = "Cyan" }
+                        elseif ($line -match "================================================================================") { $color = "Cyan" }
                         
                         Write-ReportOutput -Message $line -Color $color
                     }
@@ -1867,7 +1869,7 @@ $runSetupButton.Add_Click({
         if ($osType -eq "Linux") {
             Send-Output -Message "[Server $serverNum] Verifying/Installing Docker..." -Color "Cyan" -ServerNum $serverNum
             Invoke-WithOutput -ScriptBlock {
-                $script:dockerSuccess = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
+                $script:dockerSuccess = Install-DockerLinux -IP $Config.IP -User $Config.User -Password $Config.Password
             } -ServerNum $serverNum
             $dockerSuccess = $script:dockerSuccess
             
@@ -1876,7 +1878,6 @@ $runSetupButton.Add_Click({
                 Write-LogError -Message "Docker installation failed on $($Config.IP). Aborting deployment." -Component "DeploymentThread"
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
             }
-
             Send-Output -Message "[Server $serverNum] Docker is ready" -Color "Green" -ServerNum $serverNum
             
             if ($Config.UseTraefik) {
@@ -1927,9 +1928,9 @@ $runSetupButton.Add_Click({
             return @{ Success = $serviceSuccess; ServerNum = $serverNum; IP = $Config.IP; Service = $Config.Service }
         }
         elseif ($osType -eq "Windows") {
-            Send-Output -Message "[Server $serverNum] Verifying/Installing WSL2..." -Color "Cyan" -ServerNum $serverNum
+            Send-Output -Message "[Server $serverNum] Verifying/Installing WSL2 (May reboot server)..." -Color "Cyan" -ServerNum $serverNum
             Invoke-WithOutput -ScriptBlock {
-                $script:wslResult = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password
+                $script:wslResult = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -AutoReboot -WaitForReboot
             } -ServerNum $serverNum
             $wslResult = $script:wslResult
             
@@ -1938,10 +1939,9 @@ $runSetupButton.Add_Click({
                 Write-LogError -Message "WSL2 setup not ready on $($Config.IP): $($wslResult.Message)" -Component "DeploymentThread"
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "WSL2 not ready" }
             }
-
             Send-Output -Message "[Server $serverNum] Verifying/Installing Docker in WSL2..." -Color "Cyan" -ServerNum $serverNum
             Invoke-WithOutput -ScriptBlock {
-                $script:dockerSuccess = Install-Docker -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
+                $script:dockerSuccess = Install-DockerWSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -Distribution "Ubuntu-22.04"
             } -ServerNum $serverNum
             $dockerSuccess = $script:dockerSuccess
             
@@ -1950,7 +1950,6 @@ $runSetupButton.Add_Click({
                 Write-LogError -Message "Docker installation failed in WSL2 on $($Config.IP). Aborting deployment." -Component "DeploymentThread"
                 return @{ Success = $false; ServerNum = $serverNum; IP = $Config.IP; Error = "Docker installation failed" }
             }
-
             Send-Output -Message "[Server $serverNum] Docker is ready in WSL2" -Color "Green" -ServerNum $serverNum
             
             if ($Config.UseTraefik) {

@@ -31,8 +31,8 @@ $script:LogLevels = @{
 # WSL2 reboot tracking (prevents infinite reboot loops)
 $script:WSL2RebootCount = @{}
 #endregion
-
 #===============================================================================
+
 #region LOGGING FUNCTIONS
 #===============================================================================
 
@@ -40,8 +40,8 @@ $script:WSL2RebootCount = @{}
 .SYNOPSIS
     Saves connection configurations into the module's script scope.
 .DESCRIPTION
-    Why: Prevents passing port parameters manually down through dozens of nested functions. 
-    It ensures that custom ports and protocol toggles are globally respected by the module 
+    Why: Prevents passing port parameters manually down through dozens of nested functions.
+    It ensures that custom ports and protocol toggles are globally respected by the module
     during background thread execution.
 .PARAMETER SSHPort
     The SSH port to use. Default is 22.
@@ -69,7 +69,7 @@ function Set-ConnectionConfig {
 .SYNOPSIS
     Initializes the logging system and generates a timestamped log file.
 .DESCRIPTION
-    Why: Establishes a foundational file trace for debugging failed parallel deployments, 
+    Why: Establishes a foundational file trace for debugging failed parallel deployments,
     rotating automatically to prevent infinite log bloat on the host machine.
 .OUTPUTS
     The path to the generated log file.
@@ -115,7 +115,7 @@ function Initialize-Logging {
 .SYNOPSIS
     Internal helper to clear bloated log files.
 .DESCRIPTION
-    Why: Executed automatically on Init to keep the system clean of old logs that exceed 
+    Why: Executed automatically on Init to keep the system clean of old logs that exceed
     the predefined threshold ($MaxLogFileSizeMB or $MaxLogFiles).
 #>
 function Invoke-LogRotation {
@@ -141,7 +141,7 @@ function Invoke-LogRotation {
     
     $logFiles = Get-ChildItem -Path $logDir -Filter "automated-setup_*.log" | 
                 Sort-Object LastWriteTime -Descending
-    
+                
     if ($logFiles.Count -gt $script:MaxLogFiles) {
         $filesToDelete = $logFiles | Select-Object -Skip $script:MaxLogFiles
         foreach ($file in $filesToDelete) {
@@ -154,7 +154,7 @@ function Invoke-LogRotation {
 .SYNOPSIS
     Core logging utility.
 .DESCRIPTION
-    Why: Filters messages based on the globally configured $script:LogLevel threshold, 
+    Why: Filters messages based on the globally configured $script:LogLevel threshold,
     so debug info doesn't flood the standard runtime logs unless requested.
 #>
 function Write-Log {
@@ -223,32 +223,38 @@ function Write-Log {
 .SYNOPSIS
     Wrapper functions for streamlined logging syntax.
 #>
-
 function Write-LogDebug {
     param([string]$Message, [string]$Component = "General")
     Write-Log -Message $Message -Level "Debug" -Component $Component
 }
+
 function Write-LogInfo {
     param([string]$Message, [string]$Component = "General")
     Write-Log -Message $Message -Level "Info" -Component $Component
 }
+
 function Write-LogWarning {
     param([string]$Message, [string]$Component = "General")
     Write-Log -Message $Message -Level "Warning" -Component $Component
 }
+
 function Write-LogError {
     param([string]$Message, [string]$Component = "General", [System.Exception]$Exception = $null)
     Write-Log -Message $Message -Level "Error" -Component $Component -Exception $Exception
 }
+
 function Write-LogSuccess {
     param([string]$Message, [string]$Component = "General")
     Write-Log -Message $Message -Level "Success" -Component $Component
 }
+
 <#
 .SYNOPSIS
     Returns the active log file path.
 #>
-function Get-LogFilePath { return $script:LogFilePath }
+function Get-LogFilePath {
+    return $script:LogFilePath
+}
 
 <#
 .SYNOPSIS
@@ -306,7 +312,7 @@ function Write-SessionSeparator {
 function Set-LogConfiguration {
     param(
         [Parameter(Mandatory=$true)]
-        [string]$LogPath, 
+        [string]$LogPath,
         
         [string]$LogLevel = "Info"
     )
@@ -325,8 +331,8 @@ function Set-LogConfiguration {
 .SYNOPSIS
     Detects if the remote server is Linux or Windows.
 .DESCRIPTION
-    Why: Uses `Test-NetConnection` to actively probe the scoped SSH and WinRM ports. 
-    It caches and returns the OS string to prevent redundant network timeouts during nested commands. 
+    Why: Uses `Test-NetConnection` to actively probe the scoped SSH and WinRM ports.
+    It caches and returns the OS string to prevent redundant network timeouts during nested commands.
     Includes a Ping TTL fallback check.
 .PARAMETER IP
     Target server IP.
@@ -375,8 +381,8 @@ function Get-TargetOS {
 .SYNOPSIS
     Tests raw SSH connectivity.
 .DESCRIPTION
-    Why: Uses `plink` (PuTTY) to bypass OpenSSH's strict non-interactive password blocks. 
-    Generates a temporary answer file with "y" to automatically trust and store new host keys, 
+    Why: Uses `plink` (PuTTY) to bypass OpenSSH's strict non-interactive password blocks.
+    Generates a temporary answer file with "y" to automatically trust and store new host keys,
     preventing the script from freezing while waiting for a user prompt.
 #>
 function Test-SSHConnection {
@@ -411,7 +417,7 @@ function Test-SSHConnection {
 .SYNOPSIS
     Tests raw WinRM connectivity.
 .DESCRIPTION
-    Why: Passes -SkipCACheck and -SkipCNCheck to ensure connection works immediately on Homelab 
+    Why: Passes -SkipCACheck and -SkipCNCheck to ensure connection works immediately on Homelab
     targets utilizing self-signed default certificates. Will attempt to start the WinRM service if stopped.
 #>
 function Test-WinRMConnection {
@@ -444,7 +450,7 @@ function Test-WinRMConnection {
 .SYNOPSIS
     Validates global reachability.
 .DESCRIPTION
-    Why: Attempts multiple ICMP pings before attempting to delegate to the heavier 
+    Why: Attempts multiple ICMP pings before attempting to delegate to the heavier
     TCP tests (Test-SSHConnection or Test-WinRMConnection).
 #>
 function Test-RemoteConnection {
@@ -476,13 +482,9 @@ function Test-RemoteConnection {
 <#
 .SYNOPSIS
     Executes a bash payload within a Windows Target's WSL2 environment.
-.DESCRIPTION
-    Why: Windows nested virtualization limitations make automating native Docker Desktop tricky. 
-    By tunneling WinRM straight into `wsl -d Ubuntu`, we can execute identical bash syntax 
-    across both Linux and Windows target hosts.
 #>
 function Invoke-WSLCommand {
-    param ([string]$IP, [string]$User, [string]$Password, [string]$Command, [string]$Distribution = "Ubuntu")
+    param ([string]$IP, [string]$User, [string]$Password, [string]$Command)
     Write-LogDebug -Message "Entering Invoke-WSLCommand for IP: $IP" -Component "RemoteConnection"
     try {
         $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
@@ -496,14 +498,34 @@ function Invoke-WSLCommand {
         }
         
         $result = Invoke-Command -Session $session -ScriptBlock {
-            param($Cmd, $Distro)
-            $wslCheck = & wsl --status 2>&1
-            if ($LASTEXITCODE -ne 0 -or $wslCheck -match "not installed|is not installed") { return @{ Output = "WSL is not ready."; ExitCode = 1; WSLNotReady = $true } }
-            $distroList = wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
-            if ($distroList -notmatch $Distro) { return @{ Output = "Distribution '$Distro' not found."; ExitCode = 1; WSLNotReady = $false } }
-            $output = $Cmd | wsl -d $Distro -u root bash 2>&1
-            return @{ Output = $output; ExitCode = $LASTEXITCODE; WSLNotReady = $false }
-        } -ArgumentList $Command, $Distribution
+            param($Cmd)
+            $ErrorActionPreference = "SilentlyContinue"
+            $env:WSL_UTF8=1
+            
+            $wslExe = if (Test-Path "$env:windir\sysnative\wsl.exe") { "$env:windir\sysnative\wsl.exe" } else { "wsl.exe" }
+            
+            $distroListRaw = & $wslExe --list --quiet 2>&1 | ForEach-Object { $_.ToString() }
+            $distroList = ($distroListRaw -join ' ') -replace "\x00", ""
+            
+            if ($distroList -match "not installed|is not installed|has no installed") { 
+                return @{ Output = "WSL is not ready."; ExitCode = 1; WSLNotReady = $true } 
+            }
+            
+            $CmdUnix = $Cmd -replace "`r`n", "`n"
+            $b64Cmd = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($CmdUnix))
+            
+            # Explicitly executing against the default distribution
+            $rawOutputRaw = & $wslExe -u root bash -c "echo '$b64Cmd' | base64 -d | bash" 2>&1 | ForEach-Object { $_.ToString() }
+            $rawOutput = $rawOutputRaw -join "`n"
+            
+            $cleanOutput = $rawOutput -replace "\x00", ""
+            $cleanOutput = $cleanOutput -replace "(?mi)^\s*wsl: Failed to start the systemd user session.*$\r?\n?", ""
+            $cleanOutput = $cleanOutput -replace "(?mi)^\s*獷㩬䘠楡敬⁤潴猠慴瑲琠敨猠獹整摭甠敳⁲敳獳潩⁮潦⁲爧潯❴.*$\r?\n?", ""
+            $cleanOutput = $cleanOutput.Trim()
+            
+            return @{ Output = $cleanOutput; ExitCode = 0; WSLNotReady = $false }
+        } -ArgumentList $Command
+        
         Remove-PSSession -Session $session
         if ($result.WSLNotReady) { 
             Write-LogWarning -Message "WSL is not ready on target $IP" -Component "RemoteConnection"
@@ -521,7 +543,7 @@ function Invoke-WSLCommand {
 .SYNOPSIS
     The core transport router executing commands on remote targets.
 .DESCRIPTION
-    Why: Abstracts away the protocol logic. If the target is Linux, it executes via PuTTY (plink) 
+    Why: Abstracts away the protocol logic. If the target is Linux, it executes via PuTTY (plink)
     using the `-batch` and `-pw` flags. If the target is Windows, it routes it to `Invoke-WSLCommand`.
 .PARAMETER Command
     The bash payload to execute.
@@ -576,7 +598,7 @@ function Invoke-RemoteCommand {
 .SYNOPSIS
     Fetches raw host machine hardware metrics.
 .DESCRIPTION
-    Why: Delegates to OS-specific fetching functions after verifying the machine is 
+    Why: Delegates to OS-specific fetching functions after verifying the machine is
     still responding to an ICMP ping, returning an object mapped explicitly for the GUI.
 #>
 function Get-ServerHealth {
@@ -590,7 +612,7 @@ function Get-ServerHealth {
         }
         
         $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
-        if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password $Password -OSType $osType }
+        if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password -OSType $osType }
         elseif ($osType -eq "Windows") { return Get-WindowsServerHealth -IP $IP -User $User -Password $Password }
         else { 
             Write-LogWarning -Message "OS Type unknown for $IP during health check." -Component "HealthMonitor"
@@ -607,7 +629,7 @@ function Get-ServerHealth {
 .SYNOPSIS
     Fetches hardware metrics from a Linux target.
 .DESCRIPTION
-    Why: Formats a massive single bash string wrapping `top`, `free`, `df`, and `uptime` 
+    Why: Formats a massive single bash string wrapping `top`, `free`, `df`, and `uptime`
     to parse memory and CPU blocks remotely, preventing the need for multiple heavy SSH connections.
 #>
 function Get-LinuxServerHealth {
@@ -695,7 +717,7 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
 .SYNOPSIS
     Fetches hardware metrics from a Windows target.
 .DESCRIPTION
-    Why: Uses native `Get-CimInstance` WMI requests passed through WinRM to gather load values 
+    Why: Uses native `Get-CimInstance` WMI requests passed through WinRM to gather load values
     natively without invoking WSL.
 #>
 function Get-WindowsServerHealth {
@@ -731,8 +753,8 @@ function Get-WindowsServerHealth {
 .SYNOPSIS
     Queries Docker stats and metadata.
 .DESCRIPTION
-    Why: Drastically optimized to query container lists, resource stats, and health checks 
-    concurrently through one massive inline bash subshell (`docker ps -aq`). This prevents the script 
+    Why: Drastically optimized to query container lists, resource stats, and health checks
+    concurrently through one massive inline bash subshell (`docker ps -aq`). This prevents the script
     from opening separate SSH connections per container, dropping execution time from >4 mins to 3 seconds.
 #>
 function Get-ContainerHealth {
@@ -783,14 +805,12 @@ function Get-ContainerHealth {
         foreach ($line in $containerLines) {
             $parts = $line -split '\|'
             if ($parts.Count -lt 6) { continue }
-
             $cId = $parts[0].Trim()
             $cName = $parts[1].Trim()
             $cImage = $parts[2].Trim()
             $cStatus = $parts[3].Trim()
             $cPorts = $parts[4].Trim()
             $cState = $parts[5].Trim()
-
             if (-not [string]::IsNullOrEmpty($ContainerName) -and $cName -ne $ContainerName) { continue }
             
             $shortId = $cId.Substring(0, [Math]::Min(12, $cId.Length))
@@ -800,7 +820,6 @@ function Get-ContainerHealth {
             $containerStatusColor = "Green"
             if ($cState -ne "running" -or $insp.Health -eq "unhealthy") { $containerStatusColor = "Red" }
             elseif ($insp.Health -eq "starting" -or $insp.Restarts -gt 5) { $containerStatusColor = "Yellow" }
-
             $containers += [PSCustomObject]@{ 
                 ContainerId = $cId
                 Name = $cName
@@ -978,9 +997,9 @@ function Test-CommonServices {
 .SYNOPSIS
     Universal Docker Compose deploying wrapper.
 .DESCRIPTION
-    Why: Instead of opening a new SSH connection for every single command (mkdir, compose down, echo, compose up), 
-    we parse the inputs and construct a massive batched bash string separated by semicolons. 
-    This reduces a sequential setup into a single ~15-second remote payload. 
+    Why: Instead of opening a new SSH connection for every single command (mkdir, compose down, echo, compose up),
+    we parse the inputs and construct a massive batched bash string separated by semicolons.
+    This reduces a sequential setup into a single ~15-second remote payload.
     It also natively checks for port 53 allocations to forcefully disable systemd-resolved conflicts automatically.
 #>
 function Deploy-DockerService {
@@ -1052,12 +1071,9 @@ function Deploy-DockerService {
 
 <#
 .SYNOPSIS
-    Automated Docker Engine installer.
-.DESCRIPTION
-    Why: Resolves apt packages, manages trusted GPG keys, sets up repo sources, and configures 
-    user permissions dynamically inside a single batched command. Fast-exits instantly if Docker is already found.
+    Automated Docker Engine installer for native Linux servers.
 #>
-function Install-Docker {
+function Install-DockerLinux {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
     Write-LogDebug -Message "Entering Install-Docker for IP: $IP" -Component "Deployment"
     try {
@@ -1095,10 +1111,107 @@ function Install-Docker {
 
 <#
 .SYNOPSIS
+    Automated Docker Engine installer for WSL2 environments.
+#>
+function Install-DockerWSL2 {
+    param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
+    Write-LogDebug -Message "Entering Install-Docker for IP: $IP" -Component "Deployment"
+    try {
+        $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
+        
+        if ($os -eq "Windows") {
+            Write-LogInfo -Message "Enabling systemd and configuring WSL2 user profile on Windows host." -Component "Deployment"
+            $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+            $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
+            $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+            $session = New-PSSession -ComputerName $IP -Port $script:WinRMPort -Credential $credential -SessionOption $sessionOption -ErrorAction Stop
+            
+            # CRITICAL FIX: Pipe the setup block to Out-Null to prevent WinRM from polluting the return value
+            Invoke-Command -Session $session -ScriptBlock {
+                param($LinuxUser)
+                $env:WSL_UTF8=1
+                $wslExe = if (Test-Path "$env:windir\sysnative\wsl.exe") { "$env:windir\sysnative\wsl.exe" } else { "wsl.exe" }
+                
+                & $wslExe -u root -- bash -c "id -u $LinuxUser &>/dev/null || useradd -m -G adm,cdrom,sudo,dip,plugdev,users -s /bin/bash $LinuxUser"
+                
+                $wslConf = "[boot]`nsystemd=true`n[user]`ndefault=$LinuxUser`n[network]`ngenerateResolvConf=false`ngenerateHosts=true"
+                $wslConf | & $wslExe -u root -- tee /etc/wsl.conf > $null
+                
+                $wslConfig = "[wsl2]`nmemory=4GB`nprocessors=2`nswap=2GB"
+                $wslConfig | Out-File -FilePath "$env:USERPROFILE\.wslconfig" -Encoding UTF8 -Force
+                
+                & $wslExe --shutdown
+                Start-Sleep -Seconds 5
+                
+                & $wslExe -u root -- bash -c "sleep 2" *>$null
+            } -ArgumentList $User | Out-Null
+            
+            Remove-PSSession -Session $session
+        }
+
+        $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
+        if ($null -ne $dockerCheck -and $dockerCheck -match "Docker version") { 
+            Write-LogInfo -Message "Docker is already installed on $IP" -Component "Deployment"
+            return $true 
+        }
+        
+        $installCmd = @"
+export DEBIAN_FRONTEND=noninteractive
+
+while [ "`$(systemctl is-system-running 2>/dev/null)" = "starting" ]; do sleep 1; done
+sleep 15
+
+systemctl stop systemd-resolved 2>/dev/null || true
+systemctl disable systemd-resolved 2>/dev/null || true
+rm -f /etc/resolv.conf
+echo 'nameserver 8.8.8.8' > /etc/resolv.conf
+
+apt-get update -y
+apt-get install -y ca-certificates curl gnupg lsb-release
+mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
+chmod a+r /etc/apt/keyrings/docker.gpg
+echo "deb [arch=`$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu `$(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
+
+apt-get update -y
+apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+systemctl enable docker
+systemctl start docker || true
+usermod -aG docker $User
+"@
+        
+        Write-LogInfo -Message "Running Docker installation script on $IP..." -Component "Deployment"
+        $dockerOutput = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $installCmd -OSType $os
+        
+        if (-not [string]::IsNullOrWhiteSpace($dockerOutput)) {
+            Write-LogInfo -Message "Docker Install Output: $dockerOutput" -Component "Deployment"
+            Write-Host "Docker Install Output: $dockerOutput" -ForegroundColor Gray
+        }
+        
+        $verifyResult = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
+        $success = ($null -ne $verifyResult -and $verifyResult -match "Docker version")
+        
+        if ($success) { Write-LogSuccess -Message "Docker successfully installed on $IP" -Component "Deployment" }
+        else { 
+            Write-LogWarning -Message "Docker installation verification failed on $IP" -Component "Deployment"
+            if (-not [string]::IsNullOrWhiteSpace($dockerOutput)) {
+                Write-LogError -Message "DOCKER INSTALL LOGS: $dockerOutput" -Component "Deployment"
+            }
+        }
+        
+        return $success
+    } catch { 
+        Write-LogError -Message "Error during Install-Docker on $IP" -Component "Deployment" -Exception $_
+        return $false 
+    }
+}
+
+<#
+.SYNOPSIS
     Deploys Traefik reverse proxy.
 .DESCRIPTION
-    Why: Before invoking the standard `Deploy-DockerService`, this explicitly touches and 
-    sets 600 permissions on the `acme.json` file. Traefik will purposefully crash if this file 
+    Why: Before invoking the standard `Deploy-DockerService`, this explicitly touches and
+    sets 600 permissions on the `acme.json` file. Traefik will purposefully crash if this file
     does not have exact 600 permissions prior to container execution.
 #>
 function Install-Traefik {
@@ -1181,12 +1294,9 @@ networks:
 <#
 .SYNOPSIS
     Evaluates a Windows machine's state against WSL2 requirements.
-.DESCRIPTION
-    Why: Extracts complex prerequisite testing (VirtualMachinePlatform registry, WSL feature states) 
-    out of the install function to dictate proper reboot-loop avoidance.
 #>
 function Test-WSLReady {
-    param ([string]$IP, [string]$User, [string]$Password, [string]$Distribution = "Ubuntu")
+    param ([string]$IP, [string]$User, [string]$Password, [string]$Distribution = "Ubuntu-22.04")
     try {
         $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
         $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
@@ -1197,6 +1307,8 @@ function Test-WSLReady {
         
         $status = Invoke-Command -Session $session -ScriptBlock {
             param($Distro)
+            [Console]::OutputEncoding = [System.Text.Encoding]::Unicode
+            $ErrorActionPreference = "SilentlyContinue"
             $result = @{ WSLFeatureEnabled = $false; VMPlatformEnabled = $false; WSLKernelInstalled = $false; DistributionInstalled = $false; DistributionReady = $false; NeedsReboot = $false; Message = "" }
             
             $wslStatus = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
@@ -1209,19 +1321,26 @@ function Test-WSLReady {
             
             if ($result.WSLFeatureEnabled -and $result.VMPlatformEnabled -and -not $result.NeedsReboot) {
                 try {
-                    $wslStatusCheck = & wsl --status 2>&1
-                    $wslStatusStr = $wslStatusCheck -join ' '
+                    $wslExe = if (Test-Path "$env:windir\sysnative\wsl.exe") { "$env:windir\sysnative\wsl.exe" } else { "wsl.exe" }
+                    $wslStatusCheckRaw = & $wslExe --status 2>&1 | ForEach-Object { $_.ToString() }
+                    $wslStatusStr = ($wslStatusCheckRaw -join ' ') -replace "\x00", ""
+                    
                     if ($wslStatusStr -match "must be updated") { $result.WSLKernelInstalled = $false; $result.NeedsUpdate = $true; $result.Message = "WSL requires update via 'wsl --update'" }
                     elseif ($wslStatusStr -match "not installed|is not installed") { $result.WSLKernelInstalled = $false }
-                    elseif ($LASTEXITCODE -eq 0) { $result.WSLKernelInstalled = $true }
-                    else { $result.WSLKernelInstalled = $false }
+                    else { $result.WSLKernelInstalled = $true }
                 } catch { $result.WSLKernelInstalled = $false }
                 
                 if ($result.WSLKernelInstalled) {
-                    $distroList = & wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
-                    if ($distroList -match $Distro -or ($Distro -eq "Ubuntu" -and $distroList -match "Ubuntu")) {
+                    $distroListRaw = & $wslExe --list --quiet 2>&1 | ForEach-Object { $_.ToString() }
+                    $distroList = ($distroListRaw -join " ") -replace "\x00", ""
+                    
+                    if ($distroList -match "(?i)$Distro") {
                         $result.DistributionInstalled = $true
-                        try { $testOutput = & wsl -d $Distro -u root echo "WSL_READY_TEST" 2>&1; if ($testOutput -match "WSL_READY_TEST") { $result.DistributionReady = $true } } catch { $result.DistributionReady = $false }
+                        try { 
+                            $testOutputRaw = & $wslExe -u root echo 'WSL_READY_TEST' 2>&1 | ForEach-Object { $_.ToString() }
+                            $testOutput = ($testOutputRaw -join " ") -replace "\x00", ""
+                            if ($testOutput -match "WSL_READY_TEST") { $result.DistributionReady = $true } 
+                        } catch { $result.DistributionReady = $false }
                     }
                 }
             }
@@ -1245,162 +1364,225 @@ function Test-WSLReady {
 
 <#
 .SYNOPSIS
-    Automated WSL2 deployment.
-.DESCRIPTION
-    Why: Handles turning on underlying Windows features without immediately halting the script. 
-    Utilizes WinRM commands to update kernels and load images silently.
+    Automated WSL2 deployment. Uses Start-Process to avoid WinRM pipeline corruption.
 #>
 function Install-WSL2 {
-    param ([string]$IP, [string]$User, [string]$Password, [string]$Distribution = "Ubuntu", [switch]$AutoReboot, [switch]$WaitForReboot)
+    param ([string]$IP, [string]$User, [string]$Password, [string]$Distribution = "Ubuntu-22.04", [switch]$AutoReboot, [switch]$WaitForReboot)
     try {
-        $wslStatus = Test-WSLReady -IP $IP -User $User -Password $Password -Distribution $Distribution
-        if ($wslStatus.Ready) { return @{ Success = $true; NeedsReboot = $false; Ready = $true; Message = "WSL2 is already ready" } }
-        if ($wslStatus.NeedsReboot) {
-            if ($AutoReboot) { return Invoke-WSL2Reboot -IP $IP -User $User -Password $Password -Distribution $Distribution -WaitForReboot:$WaitForReboot }
-            else { return @{ Success = $true; NeedsReboot = $true; Ready = $false; Message = "System reboot is required" } }
-        }
-        
-        $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
-        $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
-        $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
-        $session = New-PSSession -ComputerName $IP -Port $script:WinRMPort -Credential $credential -SessionOption $sessionOption -ErrorAction Stop
-        
-        if (-not $session) { return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = "Failed to establish remote session" } }
-        
-        $installResult = Invoke-Command -Session $session -ScriptBlock {
-            param($DistroName)
-            $installSuccess = $true
-            try {
-                $wslStatus = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
-                if ($wslStatus.State -ne "Enabled") {
-                    try { Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -NoRestart -ErrorAction Stop | Out-Null }
-                    catch { $installSuccess = $false; return @{ Success = $installSuccess; NeedsReboot = $true; Message = "WSL feature installation failed" } }
+        for ($attempt = 1; $attempt -le 3; $attempt++) {
+            Write-LogInfo -Message "WSL2 Installation attempt $attempt on $IP" -Component "Deployment"
+            
+            $wslStatus = Test-WSLReady -IP $IP -User $User -Password $Password -Distribution $Distribution
+            if ($wslStatus.Ready) { return @{ Success = $true; NeedsReboot = $false; Ready = $true; Message = "WSL2 is ready" } }
+            
+            if ($wslStatus.NeedsReboot) {
+                if ($AutoReboot) { 
+                    Write-LogInfo -Message "Rebooting $IP to apply WSL features..." -Component "Deployment"
+                    if ($WaitForReboot) {
+                        $rbResult = Invoke-WSL2Reboot -IP $IP -User $User -Password $Password -Distribution $Distribution -WaitForReboot
+                    } else {
+                        $rbResult = Invoke-WSL2Reboot -IP $IP -User $User -Password $Password -Distribution $Distribution
+                    }
+                    if (-not $rbResult.Success -and -not $WaitForReboot) { return $rbResult }
+                    continue 
                 }
-                
-                $vmPlatformStatus = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
-                if ($vmPlatformStatus.State -ne "Enabled") {
-                    try { Enable-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -NoRestart -ErrorAction Stop | Out-Null }
-                    catch { $installSuccess = $false; return @{ Success = $installSuccess; NeedsReboot = $true; Message = "Virtual Machine Platform installation failed" } }
-                }
-                
-                $rebootRequired = ($wslStatus.State -ne "Enabled" -or $vmPlatformStatus.State -ne "Enabled")
-                $rebootPending = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending"
-                $rebootReq = Test-Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired"
-                if ($rebootPending -or $rebootReq) { $rebootRequired = $true }
-                
-                $wslFunctional = $false
-                try { $wslTest = & wsl --status 2>&1; if ($LASTEXITCODE -eq 0 -and $wslTest -notmatch "not installed|is not installed") { $wslFunctional = $true } } catch { $rebootRequired = $true }
-                
-                if ($rebootRequired -and -not $wslFunctional) { return @{ Success = $true; NeedsReboot = $true; Ready = $false; Message = "System reboot required" } }
+                else { return @{ Success = $true; NeedsReboot = $true; Ready = $false; Message = "System reboot is required" } }
+            }
+            
+            $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
+            $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
+            $sessionOption = New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck
+            $session = New-PSSession -ComputerName $IP -Port $script:WinRMPort -Credential $credential -SessionOption $sessionOption -ErrorAction Stop
+            
+            if (-not $session) { return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = "Failed to establish remote session" } }
+            
+            $installResult = Invoke-Command -Session $session -ScriptBlock {
+                param($LinuxUser, $LinuxPass, $DistroName)
+                $ErrorActionPreference = "Continue" 
+                $debugLog = @()
                 
                 try {
-                    $wslUpdateOutput = & wsl --update 2>&1
-                    if ($LASTEXITCODE -ne 0) { & wsl --update --web-download 2>&1 | Out-Null }
-                } catch { }
-                
-                try { & wsl --install --web-download --no-launch 2>&1 | Out-Null } catch { }
-                try { & wsl --set-default-version 2 2>&1 | Out-Null } catch { }
-                
-                $wslStatusCheck = & wsl --status 2>&1
-                if ($LASTEXITCODE -ne 0 -or $wslStatusCheck -match "must be updated|not installed") {
-                    return @{ Success = $true; NeedsReboot = $true; Ready = $false; Message = "Reboot required to activate WSL" }
-                }
-                
-                if ($DistroName -and $DistroName -ne "") {
-                    $installedDistros = & wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
-                    $distroListStr = $installedDistros -join ' '
-                    if ($distroListStr -match "not installed|is not installed") { return @{ Success = $true; NeedsReboot = $true; Ready = $false; Message = "Reboot required" } }
+                    # Absolute 64-bit path resolution to bypass 32-bit WinRM traps
+                    $wslPath = if (Test-Path "$env:windir\sysnative\wsl.exe") { "$env:windir\sysnative\wsl.exe" } else { "$env:windir\System32\wsl.exe" }
                     
-                    $foundDistro = $null
-                    if ($installedDistros -match "^$DistroName$") { $foundDistro = $DistroName }
-                    elseif ($DistroName -eq "Ubuntu" -and $installedDistros -match "Ubuntu") { $foundDistro = $installedDistros | Where-Object { $_ -match "Ubuntu" } | Select-Object -First 1 }
+                    $debugLog += "Executing WSL Installer via Start-Process to avoid pipeline corruption..."
                     
-                    if ($foundDistro) {
-                        & wsl --set-version $foundDistro 2 2>&1 | Out-Null
-                    } else {
-                        & wsl --install -d $DistroName --web-download --no-launch 2>&1 | Out-Null
-                        Start-Sleep -Seconds 30
-                        $installedDistros = & wsl --list --quiet 2>&1 | Where-Object { $_ -match '\S' }
-                        
-                        if ($installedDistros -match $DistroName) {
-                            try { & wsl -d $DistroName -u root bash -c "echo 'Initialized' && apt-get update -qq" 2>&1 | Out-Null } catch { }
-                        } else {
-                            $installSuccess = $false
+                    # Using Start-Process detaches from the pipeline, allowing the installer to run without crashing
+                    $installProc = Start-Process -FilePath $wslPath -ArgumentList "--install -d $DistroName --no-launch" -Wait -PassThru -NoNewWindow
+                    $debugLog += "wsl.exe --install process finished with ExitCode: $($installProc.ExitCode)"
+                    
+                    $debugLog += "Waiting 15 seconds for background unpacking..."
+                    Start-Sleep -Seconds 15
+                    
+                    $debugLog += "Verifying installation..."
+                    $verifyProc = Start-Process -FilePath $wslPath -ArgumentList "--status" -Wait -PassThru -NoNewWindow
+                    $debugLog += "wsl.exe --status finished with ExitCode: $($verifyProc.ExitCode)"
+
+                    $debugLog += "Waiting for distribution $DistroName to register..."
+                    $distroReady = $false
+                    for ($distroAttempt = 1; $distroAttempt -le 12; $distroAttempt++) {
+                        $distroListRaw = & $wslPath --list --quiet 2>&1 | ForEach-Object { $_.ToString() }
+                        $distroList = ($distroListRaw -join "`n") -replace "\x00", ""
+                        $escapedDistroName = [regex]::Escape($DistroName)
+                        if ($distroList -match "(?im)^\s*$escapedDistroName\s*$") {
+                            $distroReady = $true
+                            break
                         }
+
+                        $debugLog += "Distribution $DistroName not ready yet (attempt $distroAttempt/12); waiting 10 seconds..."
+                        Start-Sleep -Seconds 10
+                    }
+
+                    if (-not $distroReady) {
+                        $debugLog += "Distribution $DistroName did not register in time."
+                        return @{ Success = $false; NeedsReboot = $true; Ready = $false; Message = "WSL installed but distribution '$DistroName' is not available yet."; DebugLog = $debugLog }
+                    }
+
+                    $debugLog += "Priming distribution $DistroName..."
+                    $primeProc = Start-Process -FilePath $wslPath -ArgumentList "-d $DistroName -u root -- bash -lc `"echo WSL_READY_TEST`"" -Wait -PassThru -NoNewWindow
+                    $debugLog += "wsl.exe prime run finished with ExitCode: $($primeProc.ExitCode)"
+                    
+                    # Create User natively
+                    $debugLog += "Creating Linux user $LinuxUser..."
+                    $bashCmd = "id -u {0} &>/dev/null || (useradd -m -G adm,cdrom,sudo,dip,plugdev,users -s /bin/bash {0} && echo '{0}:{1}' | chpasswd)" -f $LinuxUser, $LinuxPass
+                    Start-Process -FilePath $wslPath -ArgumentList "-d $DistroName -u root bash -c `"$bashCmd`"" -Wait -NoNewWindow | Out-Null
+                    
+                    # Inject configuration
+                    $debugLog += "Injecting wsl.conf..."
+                    $wslConf = "[boot]`nsystemd=true`n[user]`ndefault=$LinuxUser"
+                    $confPath = "$env:TEMP\wsl_conf.txt"
+                    Set-Content -Path $confPath -Value $wslConf -Force
+                    Start-Process -FilePath $wslPath -ArgumentList "-d $DistroName -u root bash -c `"cat $(($confPath -replace '\\','/')) > /etc/wsl.conf`"" -Wait -NoNewWindow | Out-Null
+                    
+                    return @{ Success = $true; NeedsReboot = $false; Ready = $true; Message = "WSL2 installation completed successfully."; DebugLog = $debugLog }
+                }
+                catch { 
+                    $debugLog += "CRITICAL ERROR in Try/Catch: $($_.Exception.Message)"
+                    return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = "Installation failed: $($_.Exception.Message)"; DebugLog = $debugLog } 
+                }
+            } -ArgumentList $User, $Password, $Distribution
+            
+            Remove-PSSession -Session $session
+            
+            if ($installResult.DebugLog) {
+                Write-Host "--- WSL2 INSTALLATION DEBUG TRACE ---" -ForegroundColor Magenta
+                Write-LogInfo -Message "--- WSL2 INSTALLATION DEBUG TRACE ---" -Component "Deployment"
+                
+                foreach ($line in $installResult.DebugLog) {
+                    if ($line -match "FAILED|CRITICAL ERROR") {
+                        Write-Host "    $line" -ForegroundColor Red
+                        Write-LogError -Message $line -Component "Deployment"
+                    } else {
+                        Write-Host "    $line" -ForegroundColor Gray
+                        Write-LogInfo -Message $line -Component "Deployment"
                     }
                 }
-                
-                $wslStatusAfter = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Windows-Subsystem-Linux -ErrorAction SilentlyContinue
-                $vmStatusAfter = Get-WindowsOptionalFeature -Online -FeatureName VirtualMachinePlatform -ErrorAction SilentlyContinue
-                $rebootRequired = ($wslStatusAfter.RestartNeeded -eq $true) -or ($vmStatusAfter.RestartNeeded -eq $true) -or $rebootRequired
-                
-                $message = if (-not $installSuccess) { "WSL2 distribution installation failed." } elseif ($rebootRequired) { "System reboot is required." } else { "WSL2 installation completed successfully." }
-                return @{ Success = $installSuccess; NeedsReboot = $rebootRequired; Ready = (-not $rebootRequired -and $installSuccess); Message = $message }
+                Write-Host "-------------------------------------" -ForegroundColor Magenta
+                Write-LogInfo -Message "-------------------------------------" -Component "Deployment"
             }
-            catch { return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = "Installation failed: $($_.Exception.Message)" } }
-        } -ArgumentList $Distribution
-        Remove-PSSession -Session $session
-        
-        if ($installResult.Success) {
+            
             if ($installResult.NeedsReboot) {
-                if ($AutoReboot) { return Invoke-WSL2Reboot -IP $IP -User $User -Password $Password -Distribution $Distribution -WaitForReboot:$WaitForReboot }
+                if ($AutoReboot) { 
+                    if ($WaitForReboot) {
+                        Invoke-WSL2Reboot -IP $IP -User $User -Password $Password -Distribution $Distribution -WaitForReboot | Out-Null
+                    } else {
+                        Invoke-WSL2Reboot -IP $IP -User $User -Password $Password -Distribution $Distribution | Out-Null
+                    }
+                    continue
+                }
                 return @{ Success = $true; NeedsReboot = $true; Ready = $false; Message = $installResult.Message }
             }
-            return @{ Success = $true; NeedsReboot = $false; Ready = $true; Message = $installResult.Message }
-        } else {
-            return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = $installResult.Message }
+            
+            if ($installResult.Ready) {
+                return @{ Success = $true; NeedsReboot = $false; Ready = $true; Message = $installResult.Message }
+            }
         }
+        
+        return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = "Failed to install WSL2 after multiple attempts." }
     }
     catch { return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = "Error: $($_.Exception.Message)" } }
 }
 
 <#
 .SYNOPSIS
-    Forces remote reboot sequence on Windows.
+    Reboots the target Windows host and waits for WinRM to return.
 .DESCRIPTION
-    Why: Handles the connection loss expected during a system reboot while tracking attempts 
-    via `$script:WSL2RebootCount` to ensure a broken node doesn't stick the thread in an infinite loop.
+    Why: Manages the required system restarts for enabling nested virtualization
+    features. Tracks reboot attempts to prevent infinite loops.
 #>
 function Invoke-WSL2Reboot {
-    param ([string]$IP, [string]$User, [string]$Password, [string]$Distribution = "Ubuntu", [switch]$WaitForReboot, [int]$TimeoutMinutes = 10, [int]$MaxReboots = 2)
+    param (
+        [string]$IP, 
+        [string]$User, 
+        [string]$Password, 
+        [string]$Distribution, 
+        [switch]$WaitForReboot
+    )
+    Write-LogDebug -Message "Entering Invoke-WSL2Reboot for IP: $IP" -Component "Deployment"
     try {
-        if (-not $script:WSL2RebootCount.ContainsKey($IP)) { $script:WSL2RebootCount[$IP] = 0 }
+        # Initialize reboot counter for this IP if it doesn't exist
+        if (-not $script:WSL2RebootCount.ContainsKey($IP)) {
+            $script:WSL2RebootCount[$IP] = 0
+        }
+        
+        # Anti-infinite-loop guardrail
+        if ($script:WSL2RebootCount[$IP] -ge 2) {
+            Write-LogError -Message "Reboot loop detected on $IP. Aborting WSL2 setup." -Component "Deployment"
+            return @{ Success = $false; Message = "Reboot loop detected" }
+        }
+        
         $script:WSL2RebootCount[$IP]++
-        if ($script:WSL2RebootCount[$IP] -gt $MaxReboots) { return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = "Maximum reboot attempts reached." } }
+        Write-LogInfo -Message "Initiating reboot on $IP (Attempt $($script:WSL2RebootCount[$IP]))" -Component "Deployment"
         
         $securePassword = ConvertTo-SecureString $Password -AsPlainText -Force
         $credential = New-Object System.Management.Automation.PSCredential ($User, $securePassword)
         
-        try { 
-            # Force remote reboot via targeted session using custom port
-            $rebootSession = New-PSSession -ComputerName $IP -Port $script:WinRMPort -Credential $credential -SessionOption (New-PSSessionOption -SkipCACheck -SkipCNCheck -SkipRevocationCheck) -ErrorAction Stop
-            Invoke-Command -Session $rebootSession -ScriptBlock { Restart-Computer -Force }
-            Remove-PSSession -Session $rebootSession
-        } catch { 
-            try { Restart-Computer -ComputerName $IP -Credential $credential -Force -ErrorAction Stop } 
-            catch { return @{ Success = $false; NeedsReboot = $true; Ready = $false; Message = "Failed to initiate reboot." } }
+        # Trigger remote restart
+        Restart-Computer -ComputerName $IP -Credential $credential -Force -ErrorAction Stop
+        
+        if ($WaitForReboot) {
+            Write-LogInfo -Message "Waiting for WinRM service to return on $IP..." -Component "Deployment"
+            
+            # Poll for WinRM connectivity to resume
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+            $isOnline = $false
+            
+            while ($sw.Elapsed.TotalMinutes -lt 10) {
+                Start-Sleep -Seconds 15
+                if (Test-WinRMConnection -IP $IP -User $User -Password $Password) {
+                    $isOnline = $true
+                    break
+                }
+            }
+            $sw.Stop()
+            
+            if (-not $isOnline) {
+                Write-LogError -Message "Timeout waiting for $IP to return from reboot." -Component "Deployment"
+                return @{ Success = $false; Message = "Timeout waiting for server to reboot" }
+            }
+            
+            Write-LogInfo -Message "Server $IP is back online." -Component "Deployment"
+            # Hard sleep to allow background services (like WSL) to fully spin up after network connects
+            Start-Sleep -Seconds 15 
         }
         
-        if (-not $WaitForReboot) { return @{ Success = $true; NeedsReboot = $true; Ready = $false; Rebooting = $true; Message = "System is rebooting." } }
-        
-        Start-Sleep -Seconds 60 # Simulating wait...
-        
-        $wslStatus = Test-WSLReady -IP $IP -User $User -Password $Password -Distribution $Distribution
-        if ($wslStatus.Ready) { return @{ Success = $true; NeedsReboot = $false; Ready = $true; Message = "WSL2 is ready after reboot" } }
-        else { return @{ Success = $wslStatus.Ready; NeedsReboot = $wslStatus.NeedsReboot; Ready = $wslStatus.Ready; Message = $wslStatus.Message } }
-    } catch { return @{ Success = $false; NeedsReboot = $false; Ready = $false; Message = "Error during reboot." } }
+        return @{ Success = $true; Message = "Reboot completed successfully" }
+    }
+    catch {
+        Write-LogError -Message "Failed to reboot ${IP}: $($_.Exception.Message)" -Component "Deployment"
+        return @{ Success = $false; Message = "Reboot failed: $($_.Exception.Message)" }
+    }
 }
 #endregion
 
 #===============================================================================
 #region MODULE EXPORTS
 #===============================================================================
-
 Export-ModuleMember -Function @(
     'Initialize-Logging', 'Set-LogConfiguration', 'Write-Log', 'Write-LogDebug', 'Write-LogInfo', 'Write-LogWarning', 'Write-LogError', 'Write-LogSuccess', 'Get-LogFilePath', 'Get-LogContent', 'Clear-OldLogs', 'Write-SessionSeparator',
     'Get-TargetOS', 'Test-SSHConnection', 'Test-WinRMConnection', 'Test-RemoteConnection', 'Invoke-WSLCommand', 'Invoke-RemoteCommand',
     'Get-ServerHealth', 'Get-LinuxServerHealth', 'Get-WindowsServerHealth', 'Get-ContainerHealth', 'Get-ContainerLogs', 'Restart-Container', 'Stop-Container', 'Start-Container', 'Get-FullHealthReport', 'Format-HealthReport', 'Test-ServiceHealth', 'Test-CommonServices',
-    'Install-Docker', 'Install-Traefik', 'Deploy-DockerService',
+    'Install-DockerLinux', 'Install-DockerWSL2', 'Install-Traefik', 'Deploy-DockerService',
     'Test-WSLReady', 'Install-WSL2', 'Invoke-WSL2Reboot', 'Set-ConnectionConfig'
 )
 #endregion
