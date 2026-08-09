@@ -1927,9 +1927,9 @@ $runSetupButton.Add_Click({
             return @{ Success = $serviceSuccess; ServerNum = $serverNum; IP = $Config.IP; Service = $Config.Service }
         }
         elseif ($osType -eq "Windows") {
-            Send-Output -Message "[Server $serverNum] Verifying/Installing WSL2..." -Color "Cyan" -ServerNum $serverNum
+            Send-Output -Message "[Server $serverNum] Verifying/Installing WSL2 (May reboot server)..." -Color "Cyan" -ServerNum $serverNum
             Invoke-WithOutput -ScriptBlock {
-                $script:wslResult = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password
+                $script:wslResult = Install-WSL2 -IP $Config.IP -User $Config.User -Password $Config.Password -AutoReboot -WaitForReboot
             } -ServerNum $serverNum
             $wslResult = $script:wslResult
             
