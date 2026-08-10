@@ -46,7 +46,7 @@ vagrant up --provider hyperv
 
 # Check status
 vagrant status
-
+```
 This provisions test servers (e.g., Debian at `192.168.56.11`). All servers use:
 - **Username**: `testuser`
 - **Password**: `testpass123`
@@ -79,7 +79,7 @@ vagrant powershell windows1
 
 # Check VM status
 vagrant status
-
+```
 ## Troubleshooting
 **VMs won't start (Not enough memory error):**
 - Hyper-V requires contiguous memory blocks. If you see `0x800705AA` or `0x8007000E`, close heavy background applications (browsers, IDEs) on your physical host machine to free up RAM, then retry `vagrant up`.

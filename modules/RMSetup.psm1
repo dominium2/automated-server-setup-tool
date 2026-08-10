@@ -31,26 +31,27 @@ $script:LogLevels = @{
 # WSL2 reboot tracking (prevents infinite reboot loops)
 $script:WSL2RebootCount = @{}
 #endregion
-
 #===============================================================================
+
 #region LOGGING FUNCTIONS
 #===============================================================================
-
 <#
 .SYNOPSIS
     Saves connection configurations into the module's script scope.
 .DESCRIPTION
-    Why: Prevents passing port parameters manually down through dozens of nested functions.
-    It ensures that custom ports and protocol toggles are globally respected by the module
-    during background thread execution.
+    WHAT IT DOES: Overwrites the default global variables for SSH and WinRM ports.
+    HOW IT WORKS: Simple variable assignment overriding the `$script:` scope values.
+    WHY IT IS NEEDED: Prevents the need to pass custom port parameters manually down through dozens of nested functions. This ensures that custom ports (e.g., SSH port 2222) and protocol toggles set in the GUI are globally respected by the module during threaded background execution.
 .PARAMETER SSHPort
-    The SSH port to use. Default is 22.
+    The integer port to use for SSH connections. Default is 22.
 .PARAMETER WinRMPort
-    The WinRM HTTP port to use. Default is 5985.
+    The integer port to use for WinRM HTTP connections. Default is 5985.
 .PARAMETER EnableSSH
-    Whether to attempt SSH connections. Default is $true.
+    Boolean indicating whether to attempt SSH connections. Default is $true.
 .PARAMETER EnableWinRM
-    Whether to attempt WinRM connections. Default is $true.
+    Boolean indicating whether to attempt WinRM connections. Default is $true.
+.OUTPUTS
+    None.
 #>
 function Set-ConnectionConfig {
     param(
@@ -69,10 +70,27 @@ function Set-ConnectionConfig {
 .SYNOPSIS
     Initializes the logging system and generates a timestamped log file.
 .DESCRIPTION
-    Why: Establishes a foundational file trace for debugging failed parallel deployments,
-    rotating automatically to prevent infinite log bloat on the host machine.
+    WHAT IT DOES: Creates the active log file for the session and configures logging limits.
+    HOW IT WORKS: 
+        1. Checks if the `logs/` directory exists. If not, it creates it.
+        2. Generates a strict timestamped filename (e.g., `automated-setup_2024-01-01.log`).
+        3. Calls `Invoke-LogRotation` to clean up old files.
+        4. Writes an initial startup string to the file to confirm it is accessible.
+    WHY IT IS NEEDED: Establishes a foundational file trace for debugging failed parallel deployments, ensuring backend PowerShell errors aren't lost when the GUI terminates.
+.PARAMETER LogDirectory
+    Path to the folder where logs should reside. Defaults to `../logs`.
+.PARAMETER LogLevel
+    The minimum severity level to record (Debug, Info, Warning, Error). Defaults to "Info".
+.PARAMETER LogToFile
+    Boolean indicating whether writing to disk is permitted.
+.PARAMETER LogToConsole
+    Boolean indicating whether to echo the log out to standard host output.
+.PARAMETER MaxLogFileSizeMB
+    Maximum allowable size of a log file before it is rotated. Defaults to 10MB.
+.PARAMETER MaxLogFiles
+    Maximum amount of old log files to retain. Defaults to 5.
 .OUTPUTS
-    The path to the generated log file.
+    String. The absolute file path to the newly generated log file.
 #>
 function Initialize-Logging {
     param(
@@ -115,8 +133,14 @@ function Initialize-Logging {
 .SYNOPSIS
     Internal helper to clear bloated log files.
 .DESCRIPTION
-    Why: Executed automatically on Init to keep the system clean of old logs that exceed
-    the predefined threshold ($MaxLogFileSizeMB or $MaxLogFiles).
+    WHAT IT DOES: Analyzes the current log directory and prunes outdated or overgrown log files.
+    HOW IT WORKS: 
+        1. Checks the current log file size against `$script:MaxLogFileSizeMB`. If it exceeds the limit, it appends a timestamp to the filename to "archive" it.
+        2. Retrieves all log files in the directory sorted by creation date.
+        3. If the total number of files exceeds `$script:MaxLogFiles`, it runs `Remove-Item` on the oldest ones until the limit is respected.
+    WHY IT IS NEEDED: Executed automatically on `Initialize-Logging` to prevent the host machine from running out of disk space due to infinite log bloat.
+.OUTPUTS
+    None.
 #>
 function Invoke-LogRotation {
     if (-not $script:LogToFile -or [string]::IsNullOrEmpty($script:LogFilePath)) {
@@ -140,7 +164,7 @@ function Invoke-LogRotation {
     }
     
     $logFiles = Get-ChildItem -Path $logDir -Filter "automated-setup_*.log" | 
-                Sort-Object LastWriteTime -Descending
+                Sort-Object LastWriteTime -Descending 
                 
     if ($logFiles.Count -gt $script:MaxLogFiles) {
         $filesToDelete = $logFiles | Select-Object -Skip $script:MaxLogFiles
@@ -152,10 +176,24 @@ function Invoke-LogRotation {
 
 <#
 .SYNOPSIS
-    Core logging utility.
+    Core logging utility that handles thread-safe file writes.
 .DESCRIPTION
-    Why: Filters messages based on the globally configured $script:LogLevel threshold,
-    so debug info doesn't flood the standard runtime logs unless requested.
+    WHAT IT DOES: Formats strings with timestamps, severity levels, and components, then writes them to the disk.
+    HOW IT WORKS: 
+        1. Compares the requested `$Level` against the globally configured `$script:LogLevel` dictionary. If the requested level is lower (e.g. Debug < Info), it silently discards the message.
+        2. Unpacks nested exceptions if provided.
+        3. Implements a `while` loop surrounding an `AppendAllText` method. If a background Runspace is currently locking the text file, it will `Start-Sleep` for a random 50-150 millisecond interval and try writing again (up to 5 times).
+    WHY IT IS NEEDED: This is the backbone of the logging architecture. The thread-safe retry loop is completely mandatory, otherwise the parallel deployment execution would constantly throw "File is being used by another process" exceptions.
+.PARAMETER Message
+    The literal string to log.
+.PARAMETER Level
+    The severity flag (Debug, Info, Warning, Error, Success).
+.PARAMETER Component
+    A string identifier showing which module generated the log (e.g. "Deployment", "GUI", "HealthMonitor").
+.PARAMETER Exception
+    An optional C# or PowerShell Exception object to unpack and print to the log.
+.OUTPUTS
+    None. Modifies the log file.
 #>
 function Write-Log {
     param(
@@ -221,28 +259,59 @@ function Write-Log {
 
 <#
 .SYNOPSIS
-    Wrapper functions for streamlined logging syntax.
+    Wrapper function for streamlined logging syntax.
+.DESCRIPTION
+    WHAT IT DOES: A syntactic shortcut to `Write-Log -Level "Debug"`.
+    WHY IT IS NEEDED: Cleans up the codebase by drastically reducing parameter lengths in caller blocks.
 #>
 function Write-LogDebug {
     param([string]$Message, [string]$Component = "General")
     Write-Log -Message $Message -Level "Debug" -Component $Component
 }
 
+<#
+.SYNOPSIS
+    Wrapper function for streamlined logging syntax.
+.DESCRIPTION
+    WHAT IT DOES: A syntactic shortcut to `Write-Log -Level "Info"`.
+    WHY IT IS NEEDED: Cleans up the codebase by drastically reducing parameter lengths in caller blocks.
+#>
 function Write-LogInfo {
     param([string]$Message, [string]$Component = "General")
     Write-Log -Message $Message -Level "Info" -Component $Component
 }
 
+<#
+.SYNOPSIS
+    Wrapper function for streamlined logging syntax.
+.DESCRIPTION
+    WHAT IT DOES: A syntactic shortcut to `Write-Log -Level "Warning"`.
+    WHY IT IS NEEDED: Cleans up the codebase by drastically reducing parameter lengths in caller blocks.
+#>
 function Write-LogWarning {
     param([string]$Message, [string]$Component = "General")
     Write-Log -Message $Message -Level "Warning" -Component $Component
 }
 
+<#
+.SYNOPSIS
+    Wrapper function for streamlined logging syntax.
+.DESCRIPTION
+    WHAT IT DOES: A syntactic shortcut to `Write-Log -Level "Error"`. Allows passing the raw exception object.
+    WHY IT IS NEEDED: Cleans up the codebase by drastically reducing parameter lengths in caller blocks.
+#>
 function Write-LogError {
     param([string]$Message, [string]$Component = "General", [System.Exception]$Exception = $null)
     Write-Log -Message $Message -Level "Error" -Component $Component -Exception $Exception
 }
 
+<#
+.SYNOPSIS
+    Wrapper function for streamlined logging syntax.
+.DESCRIPTION
+    WHAT IT DOES: A syntactic shortcut to `Write-Log -Level "Success"`.
+    WHY IT IS NEEDED: Cleans up the codebase by drastically reducing parameter lengths in caller blocks.
+#>
 function Write-LogSuccess {
     param([string]$Message, [string]$Component = "General")
     Write-Log -Message $Message -Level "Success" -Component $Component
@@ -251,6 +320,11 @@ function Write-LogSuccess {
 <#
 .SYNOPSIS
     Returns the active log file path.
+.DESCRIPTION
+    WHAT IT DOES: Retrieves the global variable pointing to the currently active `.log` file on disk.
+    WHY IT IS NEEDED: Required to safely pass the active log path into the disconnected background `Runspaces` during deployment.
+.OUTPUTS
+    String. The active log file path.
 #>
 function Get-LogFilePath {
     return $script:LogFilePath
@@ -260,7 +334,15 @@ function Get-LogFilePath {
 .SYNOPSIS
     Reads the content of the active log file.
 .DESCRIPTION
-    Why: Used primarily for test harnesses to verify that outputs were logged successfully.
+    WHAT IT DOES: Retrieves the physical text from the active `.log` file.
+    HOW IT WORKS: Utilizes `Get-Content` to read the path returned by `$script:LogFilePath`. Supports trailing tail counts and string-matching level filters (e.g. `[Error]`).
+    WHY IT IS NEEDED: Primarily used by Pester unit tests to assert that expected outputs were successfully written to the log trace.
+.PARAMETER Tail
+    An integer representing the last `x` lines to read from the end of the file.
+.PARAMETER Level
+    A string (e.g., "Error") used to exclusively filter out specific log messages.
+.OUTPUTS
+    Array of Strings containing the log content.
 #>
 function Get-LogContent {
     param([int]$Tail = 0, [string]$Level = $null)
@@ -273,6 +355,14 @@ function Get-LogContent {
 <#
 .SYNOPSIS
     Clears out expired logs according to a day-retention policy.
+.DESCRIPTION
+    WHAT IT DOES: Deletes older `.log` files in the directory.
+    HOW IT WORKS: Selects files in the log directory whose `LastWriteTime` is older than `$DaysToKeep` and forces a deletion.
+    WHY IT IS NEEDED: An alternative to the `MaxLogFiles` cap, useful for users doing high-frequency deployments who only want to retain a temporal record (e.g. "Only logs from the last week").
+.PARAMETER DaysToKeep
+    Integer representing the number of days to retain logs.
+.OUTPUTS
+    Integer representing how many files were successfully deleted.
 #>
 function Clear-OldLogs {
     param([int]$DaysToKeep = 30)
@@ -289,6 +379,13 @@ function Clear-OldLogs {
 <#
 .SYNOPSIS
     Creates a visual separator block in the text log file.
+.DESCRIPTION
+    WHAT IT DOES: Simply appends a stylized banner string (`======...`) containing the session name and timestamp to the text file.
+    WHY IT IS NEEDED: Since the log file rotates daily, closing and re-opening the GUI within the same day will write to the same file. The separator helps users distinguish between individual tool executions within the same text log.
+.PARAMETER SessionName
+    String title to inject into the separator block.
+.OUTPUTS
+    None. Modifies the log file.
 #>
 function Write-SessionSeparator {
     param([string]$SessionName = "New Session")
@@ -307,14 +404,20 @@ function Write-SessionSeparator {
 .SYNOPSIS
     Binds a background runspace to an existing log file.
 .DESCRIPTION
-    Why: Background threads (runspaces) do not inherit script-scoped variables from the main thread.
-    This function receives the active log path from the GUI and explicitly assigns it so background logs aren't lost.
+    WHAT IT DOES: Overrides the module's script-level variables associated with logging logic.
+    HOW IT WORKS: Sets `$script:LogFilePath` and forces `$script:LogToConsole` to false (since a background thread has no console to print to).
+    WHY IT IS NEEDED: Background threads (`Runspaces`) do not inherit script-scoped variables from the main parent thread that launched them. Without this function, the deployment threads would try to create their own new log files instead of appending to the master log.
+.PARAMETER LogPath
+    The absolute string path of the master log file to target.
+.PARAMETER LogLevel
+    The verbosity level to use inside this specific thread.
+.OUTPUTS
+    None.
 #>
 function Set-LogConfiguration {
     param(
         [Parameter(Mandatory=$true)]
         [string]$LogPath,
-        
         [string]$LogLevel = "Info"
     )
     $script:LogFilePath = $LogPath
@@ -327,18 +430,20 @@ function Set-LogConfiguration {
 #===============================================================================
 #region REMOTE CONNECTION FUNCTIONS
 #===============================================================================
-
 <#
 .SYNOPSIS
-    Detects if the remote server is Linux or Windows.
+    Detects if the remote server is running a Linux or Windows operating system.
 .DESCRIPTION
-    Why: Uses `Test-NetConnection` to actively probe the scoped SSH and WinRM ports.
-    It caches and returns the OS string to prevent redundant network timeouts during nested commands.
-    Includes a Ping TTL fallback check.
+    WHAT IT DOES: Determines the remote environment to dictate the transport protocol.
+    HOW IT WORKS: 
+        1. Utilizes `Test-NetConnection` to actively probe the globally configured SSH (default 22) and WinRM (default 5985) TCP ports on the target machine. 
+        2. If the WinRM TCP probe succeeds, it returns "Windows". If the SSH TCP probe succeeds, it returns "Linux".
+        3. If the TCP probe fails due to stealth firewalls, it falls back to analyzing the Time-To-Live (TTL) of an ICMP ping response (Windows typically returns TTL ~128, Linux typically returns TTL ~64).
+    WHY IT IS NEEDED: This dynamically dictates which remote execution protocol (PuTTY/SSH or WinRM) the rest of the orchestration pipeline should use, preventing the user from manually specifying the OS for each server and preventing long TCP timeout hangs during subsequent commands.
 .PARAMETER IP
-    Target server IP.
+    The IPv4 address or hostname of the target server to probe.
 .OUTPUTS
-    String: "Windows", "Linux", or $null.
+    String. Returns "Windows", "Linux", or $null if the OS cannot be determined or the host is entirely unreachable.
 #>
 function Get-TargetOS {
     param ([string]$IP)
@@ -382,9 +487,21 @@ function Get-TargetOS {
 .SYNOPSIS
     Tests raw SSH connectivity.
 .DESCRIPTION
-    Why: Uses `plink` (PuTTY) to bypass OpenSSH's strict non-interactive password blocks.
-    Generates a temporary answer file with "y" to automatically trust and store new host keys,
-    preventing the script from freezing while waiting for a user prompt.
+    WHAT IT DOES: Verifies that a remote Linux host is ready to accept commands using the provided credentials.
+    HOW IT WORKS: 
+        1. Checks if the `plink` (PuTTY) binary is accessible on the host machine.
+        2. Generates a temporary text file containing the letter "y".
+        3. Pipes the "y" file into the `plink` command execution string: `& plink -P [Port] -pw [Password] [User]@[IP] "hostname"`. This automatically "accepts" the initial RSA/ED25519 host key prompt that SSH usually throws the very first time you connect to a new server.
+        4. Analyzes the `$LASTEXITCODE` and standard output text to verify no authentication failures occurred.
+    WHY IT IS NEEDED: Standard OpenSSH clients on Windows forcefully block non-interactive password automation. Bypassing this with `plink` allows true zero-touch deployment, and answering the host key prompt automatically prevents the deployment script from freezing indefinitely.
+.PARAMETER IP
+    Target IP address.
+.PARAMETER User
+    Target SSH Username.
+.PARAMETER Password
+    Target SSH Password.
+.OUTPUTS
+    Boolean. True if successful, False if failed.
 #>
 function Test-SSHConnection {
     param ([string]$IP, [string]$User, [string]$Password)
@@ -418,8 +535,21 @@ function Test-SSHConnection {
 .SYNOPSIS
     Tests raw WinRM connectivity.
 .DESCRIPTION
-    Why: Passes -SkipCACheck and -SkipCNCheck to ensure connection works immediately on Homelab 
-    targets utilizing self-signed default certificates. Will attempt to start the WinRM service if stopped.
+    WHAT IT DOES: Verifies that a remote Windows host is ready to accept remote PowerShell commands.
+    HOW IT WORKS: 
+        1. Optionally attempts to start the local `WinRM` service if it is stopped on the host.
+        2. Casts the raw password string into a `SecureString` and builds a `PSCredential` object.
+        3. Constructs a `PSSessionOption` object passing `-SkipCACheck`, `-SkipCNCheck`, and `-SkipRevocationCheck`.
+        4. Invokes `New-PSSession`. If it generates successfully, the test passes.
+    WHY IT IS NEEDED: Windows Remote Management natively blocks connections using self-signed certificates or IP addresses instead of FQDNs. Injecting the Skip check parameters forces WinRM to trust default Homelab environments.
+.PARAMETER IP
+    Target IP address.
+.PARAMETER User
+    Target Windows Local Administrator Username.
+.PARAMETER Password
+    Target Windows Local Administrator Password.
+.OUTPUTS
+    Boolean. True if successful, False if failed.
 #>
 function Test-WinRMConnection {
     param ([string]$IP, [string]$User, [string]$Password)
@@ -451,8 +581,20 @@ function Test-WinRMConnection {
 .SYNOPSIS
     Validates global reachability.
 .DESCRIPTION
-    Why: Attempts multiple ICMP pings before attempting to delegate to the heavier 
-    TCP tests (Test-SSHConnection or Test-WinRMConnection).
+    WHAT IT DOES: The master gating function for testing connectivity prior to deployment.
+    HOW IT WORKS: 
+        1. Issues 4 rapid ICMP Ping checks to the target machine via `Test-Connection`.
+        2. If all 4 pings succeed, it calls `Get-TargetOS` to find the operating system.
+        3. Routes the execution flow to either `Test-SSHConnection` or `Test-WinRMConnection` based on the detected OS.
+    WHY IT IS NEEDED: Ensures the host is entirely stable on the network before delegating to the much heavier (and timeout-prone) TCP WinRM/SSH negotiation protocols.
+.PARAMETER IP
+    Target IP address.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.OUTPUTS
+    Boolean. True if fully reachable and authenticated, False otherwise.
 #>
 function Test-RemoteConnection {
     param ([string]$IP, [string]$User, [string]$Password)
@@ -483,6 +625,26 @@ function Test-RemoteConnection {
 <#
 .SYNOPSIS
     Executes a bash payload within a Windows Target's WSL2 environment.
+.DESCRIPTION
+    WHAT IT DOES: Acts as an inter-process bridge. Takes a raw Linux Bash script and executes it inside the Windows target via WinRM.
+    HOW IT WORKS: 
+        1. Establishes a WinRM `PSSession` using explicit bypass flags (`SkipCACheck`).
+        2. Wraps the provided bash command (`$Command`) into a script block.
+        3. Translates Windows carriage returns (`\r\n`) into UNIX line endings (`\n`) to prevent parser errors in Bash.
+        4. Base64 encodes the entire payload on the host side.
+        5. Sends the encoded payload over WinRM into `wsl.exe`, where it is decoded (`base64 -d`) and piped directly into the `bash` interpreter as the root user.
+        6. Strips WinRM null terminators (`\x00`) from the returning output string to ensure it remains legible.
+    WHY IT IS NEEDED: Windows machines don't understand bash commands natively. To automate Docker (which relies on bash), the commands must be tunneled seamlessly from the PowerShell transport layer straight into the nested Linux kernel. Encoding in Base64 ensures special characters or quotes in the bash script don't break the PowerShell pipeline parser.
+.PARAMETER IP
+    Target IP address.
+.PARAMETER User
+    Target Windows Username.
+.PARAMETER Password
+    Target Windows Password.
+.PARAMETER Command
+    The raw bash string to execute.
+.OUTPUTS
+    A Hashtable containing `Output` (the raw execution string) and `ExitCode`. Returns `$null` upon catastrophic error.
 #>
 function Invoke-WSLCommand {
     param ([string]$IP, [string]$User, [string]$Password, [string]$Command)
@@ -503,6 +665,7 @@ function Invoke-WSLCommand {
             $ErrorActionPreference = "SilentlyContinue"
             $env:WSL_UTF8=1
             
+            # Resolve exact WSL binary path to prevent 32-bit execution traps on 64-bit systems
             $wslExe = if (Test-Path "$env:windir\sysnative\wsl.exe") { "$env:windir\sysnative\wsl.exe" } else { "wsl.exe" }
             
             $distroListRaw = & $wslExe --list --quiet 2>&1 | ForEach-Object { $_.ToString() }
@@ -544,14 +707,24 @@ function Invoke-WSLCommand {
 .SYNOPSIS
     The core transport router executing commands on remote targets.
 .DESCRIPTION
-    Why: Abstracts away the protocol logic. If the target is Linux, it executes via PuTTY (plink) 
-    using the `-batch` and `-pw` flags. If the target is Windows, it routes it to `Invoke-WSLCommand`.
+    WHAT IT DOES: Takes a single bash command and pushes it to a server, returning the raw text output.
+    HOW IT WORKS: 
+        1. Checks the `OSType` (invokes `Get-TargetOS` if the OS string wasn't explicitly provided to cache the result).
+        2. If the OS is Linux, it executes the command via `plink` using the `-batch` and `-pw` flags to enforce non-interactive automation. Evaluates `$LASTEXITCODE`.
+        3. If the OS is Windows, it delegates the entire payload directly to the `Invoke-WSLCommand` pipeline.
+    WHY IT IS NEEDED: This function abstracts away the protocol logic. Functions written further down the pipeline (like `Deploy-DockerService`) do not need to know or care if the target is Windows or Linux; they just hand a bash string to `Invoke-RemoteCommand`, which handles the heavy lifting of figuring out the transportation protocol.
+.PARAMETER IP
+    Target IP address.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
 .PARAMETER Command
     The bash payload to execute.
 .PARAMETER OSType
-    (Optional) Provided to skip the 2-second Get-TargetOS TCP port probe.
+    (Optional) String "Windows" or "Linux". Passed to skip the 2-second TCP port probe.
 .OUTPUTS
-    The raw string output of the execution, or $null if failure occurred.
+    The raw string output of the execution, or $null if a protocol failure occurred.
 #>
 function Invoke-RemoteCommand {
     param([string]$IP, [string]$User, [string]$Password, [string]$Command, [string]$OSType = $null)
@@ -594,13 +767,25 @@ function Invoke-RemoteCommand {
 #===============================================================================
 #region HEALTH MONITORING FUNCTIONS
 #===============================================================================
-
 <#
 .SYNOPSIS
     Fetches raw host machine hardware metrics.
 .DESCRIPTION
-    Why: Delegates to OS-specific fetching functions after verifying the machine is 
-    still responding to an ICMP ping, returning an object mapped explicitly for the GUI.
+    WHAT IT DOES: Wrapper function to determine the health metrics of a specific server.
+    HOW IT WORKS: 
+        1. Issues an ICMP Ping to ensure the server hasn't dropped off the network entirely. If it has, immediately returns an "Offline" object.
+        2. Detects the OS and delegates the deep polling task to `Get-LinuxServerHealth` or `Get-WindowsServerHealth`.
+    WHY IT IS NEEDED: Normalizes health data between Windows and Linux systems, returning a perfectly identical object map regardless of the underlying OS, allowing the WPF GUI to draw the health cards uniformly.
+.PARAMETER IP
+    Target IP address.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER OSType
+    (Optional) Target OS.
+.OUTPUTS
+    A `PSCustomObject` containing IP, Status, StatusColor, CPU, Memory, Disk, and Load telemetry.
 #>
 function Get-ServerHealth {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
@@ -630,8 +815,23 @@ function Get-ServerHealth {
 .SYNOPSIS
     Fetches hardware metrics from a Linux target.
 .DESCRIPTION
-    Why: Formats a massive single bash string wrapping `top`, `free`, `df`, and `uptime` 
-    to parse memory and CPU blocks remotely, preventing the need for multiple heavy SSH connections.
+    WHAT IT DOES: Retrieves system utilization (CPU, RAM, DISK) securely from the Debian/Ubuntu kernel.
+    HOW IT WORKS: 
+        1. Formats a massive single bash string wrapping `top`, `free`, `df`, and `uptime`.
+        2. Applies deep `awk` and `grep` text-processing commands *on the remote server itself* to trim the output into tight numbers before returning them across the network.
+        3. Analyzes the returned chunks, populating properties inside a PowerShell Custom Object.
+        4. Calculates an overall Status string (`Healthy`, `Warning`, or `Critical`) based on usage percentages. E.g., > 90% CPU flags the server as Critical.
+    WHY IT IS NEEDED: Consolidating these tools into one massive `echo` payload prevents the need for multiple heavy SSH connections per server, drastically reducing the time it takes the GUI to refresh.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER OSType
+    String "Linux".
+.OUTPUTS
+    `PSCustomObject` containing organized telemetry metrics.
 #>
 function Get-LinuxServerHealth {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = "Linux")
@@ -718,8 +918,20 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
 .SYNOPSIS
     Fetches hardware metrics from a Windows target.
 .DESCRIPTION
-    Why: Uses native `Get-CimInstance` WMI requests passed through WinRM to gather load values 
-    natively without invoking WSL.
+    WHAT IT DOES: Retrieves system utilization (CPU, RAM, DISK) securely from the Windows host Kernel.
+    HOW IT WORKS: 
+        1. Uses a native PowerShell runspace block executing on the target machine via WinRM.
+        2. Retrieves the Host performance counters using `Get-CimInstance` WMI requests.
+        3. Averages the load percentage of the `Win32_Processor` class, and parses `Win32_OperatingSystem` to deduce physical memory stats.
+    WHY IT IS NEEDED: Gathering load values natively from the host Windows OS is vastly superior to tunneling a health-check command into the WSL kernel. Polling inside WSL would only report the internal VM's resources, neglecting the actual desktop workload occurring natively in Windows.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Windows Username.
+.PARAMETER Password
+    Target Windows Password.
+.OUTPUTS
+    `PSCustomObject` containing organized telemetry metrics identical in structure to `Get-LinuxServerHealth`.
 #>
 function Get-WindowsServerHealth {
     param([string]$IP, [string]$User, [string]$Password)
@@ -752,11 +964,27 @@ function Get-WindowsServerHealth {
 
 <#
 .SYNOPSIS
-    Queries Docker stats and metadata.
+    Queries Docker stats and metadata globally for a server.
 .DESCRIPTION
-    Why: Drastically optimized to query container lists, resource stats, and health checks 
-    concurrently through one massive inline bash subshell (`docker ps -aq`). This prevents the script 
-    from opening separate SSH connections per container, dropping execution time from >4 mins to 3 seconds.
+    WHAT IT DOES: Collects the operational status, resource metrics, restart loops, and network ports for every single container.
+    HOW IT WORKS: 
+        1. Formats a deeply nested bash subshell utilizing Go templates (`--format "{{...}}"`) to extract precise data points from the Docker daemon.
+        2. Specifically, it chains `docker ps -a`, `docker inspect`, and `docker stats --no-stream` separating them with delimiter strings (e.g. `===STATS===`).
+        3. Once the output returns, it splits the payload by the custom delimiters and pushes the text arrays into three corresponding Hashtables mapping by `ContainerID`.
+        4. It combines the Maps into an organized Array of `PSCustomObject`s for the GUI.
+    WHY IT IS NEEDED: Previously, querying Docker stats was unoptimized and created an SSH connection per container, ballooning load times to >4 minutes per machine. Using inline bash Go formatting queries the complete container list, resources, and health checks concurrently in 3 seconds, preventing the UI from timing out.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER ContainerName
+    (Optional) Filter by container name.
+.PARAMETER OSType
+    (Optional) Target OS.
+.OUTPUTS
+    `PSCustomObject` containing an array of `$Containers` and overall container system status.
 #>
 function Get-ContainerHealth {
     param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName = $null, [string]$OSType = $null)
@@ -856,23 +1084,21 @@ function Get-ContainerHealth {
 
 <#
 .SYNOPSIS
-    Fetches raw docker logs.
-#>
-function Get-ContainerLogs {
-    param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName, [int]$Tail = 100, [string]$Since = $null)
-    try {
-        $logsCommand = "docker logs --tail $Tail"
-        if (-not [string]::IsNullOrEmpty($Since)) { $logsCommand += " --since $Since" }
-        $logsCommand += " $ContainerName 2>&1"
-        $logs = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $logsCommand
-        return [PSCustomObject]@{ ContainerName = $ContainerName; Logs = $logs; ErrorMessage = if ($null -eq $logs) { "Failed to retrieve logs" } else { $null } }
-    }
-    catch { return [PSCustomObject]@{ ContainerName = $ContainerName; Logs = $null; ErrorMessage = $_.Exception.Message } }
-}
-
-<#
-.SYNOPSIS
     Container Action: Restart.
+.DESCRIPTION
+    WHAT IT DOES: Actively bounces a remote container.
+    HOW IT WORKS: Uses `Invoke-RemoteCommand` to run `docker restart` on the target host. It catches the stdout echo to verify the daemon responded successfully.
+    WHY IT IS NEEDED: Tied to the dynamic Health Monitor GUI card buttons. Gives operators point-and-click control over broken containers.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER ContainerName
+    String matching the target Docker Container name.
+.OUTPUTS
+    Boolean value confirming success or failure.
 #>
 function Restart-Container {
     param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName)
@@ -892,6 +1118,20 @@ function Restart-Container {
 <#
 .SYNOPSIS
     Container Action: Stop.
+.DESCRIPTION
+    WHAT IT DOES: Actively stops a remote container.
+    HOW IT WORKS: Uses `Invoke-RemoteCommand` to run `docker stop` on the target host.
+    WHY IT IS NEEDED: Tied to the dynamic Health Monitor GUI card buttons. Gives operators point-and-click control over active containers.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER ContainerName
+    String matching the target Docker Container name.
+.OUTPUTS
+    Boolean value confirming success or failure.
 #>
 function Stop-Container {
     param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName)
@@ -911,6 +1151,20 @@ function Stop-Container {
 <#
 .SYNOPSIS
     Container Action: Start.
+.DESCRIPTION
+    WHAT IT DOES: Actively boots an offline container.
+    HOW IT WORKS: Uses `Invoke-RemoteCommand` to run `docker start` on the target host.
+    WHY IT IS NEEDED: Tied to the dynamic Health Monitor GUI card buttons. Gives operators point-and-click control over stopped containers.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER ContainerName
+    String matching the target Docker Container name.
+.OUTPUTS
+    Boolean value confirming success or failure.
 #>
 function Start-Container {
     param([string]$IP, [string]$User, [string]$Password, [string]$ContainerName)
@@ -929,7 +1183,19 @@ function Start-Container {
 
 <#
 .SYNOPSIS
-    Combines machine resources and docker resources into a single object.
+    Combines machine resources and docker resources into a single structured object.
+.DESCRIPTION
+    WHAT IT DOES: Generates a monolithic data object reflecting the entire state of a server.
+    HOW IT WORKS: Sequentially invokes `Get-ServerHealth` and `Get-ContainerHealth` and maps the returns to `.Server` and `.Containers` sub-properties. Evaluates combined threshold criteria to establish an `.OverallStatus`.
+    WHY IT IS NEEDED: Creates a highly structured, single-variable data entity that the `Format-HealthReport` function can easily serialize into a `.txt` file export.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.OUTPUTS
+    PSCustomObject containing full hardware and software status maps.
 #>
 function Get-FullHealthReport {
     param([string]$IP, [string]$User, [string]$Password)
@@ -949,6 +1215,16 @@ function Get-FullHealthReport {
 <#
 .SYNOPSIS
     Formats a payload for export to a text file.
+.DESCRIPTION
+    WHAT IT DOES: Converts the complex object matrix from `Get-FullHealthReport` into a human-readable text block.
+    HOW IT WORKS: Iterates through the properties of the PSCustomObject, mapping variables to neatly aligned string arrays using spacing paddings and separator lines.
+    WHY IT IS NEEDED: Fulfills the GUI's "Export Report" button functionality, creating clean, standardized `.txt` audit reports.
+.PARAMETER HealthReport
+    The PSCustomObject returned from Get-FullHealthReport.
+.PARAMETER OutputFormat
+    Legacy parameter for future extension (e.g. JSON, HTML). Currently defaults to "Console".
+.OUTPUTS
+    A joined string.
 #>
 function Format-HealthReport {
     param([PSCustomObject]$HealthReport, [string]$OutputFormat = "Console")
@@ -993,15 +1269,32 @@ function Test-CommonServices {
 #===============================================================================
 #region SERVICE INSTALLATION FUNCTIONS
 #===============================================================================
-
 <#
 .SYNOPSIS
     Universal Docker Compose deploying wrapper.
 .DESCRIPTION
-    Why: Instead of opening a new SSH connection for every single command (mkdir, compose down, echo, compose up), 
-    we parse the inputs and construct a massive batched bash string separated by semicolons. 
-    This reduces a sequential setup into a single ~15-second remote payload.
-    It also natively checks for port 53 allocations to forcefully disable systemd-resolved conflicts automatically.
+    WHAT IT DOES: Pushes the active Compose file to the target machine and executes it safely.
+    HOW IT WORKS: 
+        1. Employs regex matching (`[regex]::Matches`) to extract requested Volume mapped paths (e.g. `./data`) out of the Compose file.
+        2. Automatically formats `mkdir -p` bash commands to create those directories so the container volumes don't crash from missing paths.
+        3. If Port 53 is detected in the yaml, it injects a bash string to gracefully disable Ubuntu's internal `systemd-resolved` DNS stub listener, restarting systemd to free the port automatically.
+        4. Base64 encodes the YAML text to protect syntax during SSH transport.
+        5. Chains the directory creation, network provisioning, file decoding, teardown (`docker compose down`), and redeployment (`docker compose up`) commands using bash semicolons into a single massive command batch.
+    WHY IT IS NEEDED: Instead of opening a new SSH connection for every single command—which would take upwards of two minutes—constructing a massive batched bash string separated by semicolons reduces a complex sequential setup into a single 10-second remote payload.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER ServiceName
+    String Name identifying the deployment folder (e.g. "AdGuard").
+.PARAMETER ComposeContent
+    The full raw string of the `.yml` config.
+.PARAMETER OSType
+    (Optional) Target OS.
+.OUTPUTS
+    Boolean value confirming success or failure.
 #>
 function Deploy-DockerService {
     param (
@@ -1073,6 +1366,25 @@ function Deploy-DockerService {
 <#
 .SYNOPSIS
     Automated Docker Engine installer for native Linux servers.
+.DESCRIPTION
+    WHAT IT DOES: Implements the official Docker-CE remote installation scripts automatically.
+    HOW IT WORKS: 
+        1. Probes the server for an existing Docker instance (`docker --version`). Skips to success if found.
+        2. Constructs a monolithic `apt-get` bash payload.
+        3. Installs `curl`, downloads Docker's official GPG encryption key (`docker.asc`), and mounts it in `/etc/apt/keyrings`.
+        4. Detects the host's release (`$VERSION_CODENAME`) and registers the `stable` Docker repository in the apt sources list.
+        5. Installs `docker-ce`, `docker-compose-plugin`, enables the systemd service, and adds the current Linux User to the `docker` usergroup (so deployments don't need persistent sudo elevation).
+    WHY IT IS NEEDED: Ensures a clean, identical, standardized version of Docker exists on the host machine before deploying infrastructure, entirely bypassing the need for manual setup.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER OSType
+    (Optional) Target OS.
+.OUTPUTS
+    Boolean value confirming success or failure.
 #>
 function Install-DockerLinux {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
@@ -1113,6 +1425,24 @@ function Install-DockerLinux {
 <#
 .SYNOPSIS
     Automated Docker Engine installer for WSL2 environments.
+.DESCRIPTION
+    WHAT IT DOES: Replicates `Install-DockerLinux` but adds mandatory pre-flight checks and hardware optimizations designed strictly for the Windows Subsystem for Linux.
+    HOW IT WORKS: 
+        1. Issues an initial WinRM command to configure the WSL User Profile.
+        2. Injects a custom `wsl.conf` file to forcefully enable `systemd` inside the subsystem (critical for running Docker natively in Windows without using Docker Desktop).
+        3. Generates a `.wslconfig` on the host side, locking the VM hypervisor to 8GB of RAM and 4 Processors.
+        4. Invokes `wsl --shutdown` to reboot the kernel, then pushes the standard Linux Docker-CE installation payload into the new Systemd environment.
+    WHY IT IS NEEDED: WSL2 natively blocks raw Systemd initialization and limits system resources aggressively. The `.wslconfig` bump ensures containers don't crash from OOM (Out-of-Memory) errors during heavy IO tasks.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER OSType
+    (Optional) Target OS.
+.OUTPUTS
+    Boolean value confirming success or failure.
 #>
 function Install-DockerWSL2 {
     param([string]$IP, [string]$User, [string]$Password, [string]$OSType = $null)
@@ -1205,9 +1535,25 @@ usermod -aG docker $User
 .SYNOPSIS
     Deploys Traefik reverse proxy.
 .DESCRIPTION
-    Why: Before invoking the standard `Deploy-DockerService`, this explicitly touches and 
-    sets 600 permissions on the `acme.json` file. Traefik will purposefully crash if this file 
-    does not have exact 600 permissions prior to container execution.
+    WHAT IT DOES: Before invoking the standard `Deploy-DockerService`, this creates the required files for Let's Encrypt certificate acquisition.
+    HOW IT WORKS: Uses a pre-formatted bash payload containing `touch` and `chmod 600` targeted at the `acme.json` file inside the Traefik deployment folder. Finally, passes execution to `Deploy-DockerService` to bring the proxy online.
+    WHY IT IS NEEDED: Traefik's security model dictates that it will purposefully crash and refuse to run if its certificate storage file (`acme.json`) does not have strict Unix 600 (read/write for owner only) permissions prior to container execution. This step guarantees the permission structure.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Username.
+.PARAMETER Password
+    Target Password.
+.PARAMETER Email
+    Email to use for Let's Encrypt generation.
+.PARAMETER Domain
+    Domain for routing.
+.PARAMETER OSType
+    (Optional) Target OS.
+.PARAMETER ComposeContent
+    Optional raw YAML string of the specific Traefik template.
+.OUTPUTS
+    Boolean value confirming success or failure.
 #>
 function Install-Traefik {
     param(
@@ -1283,7 +1629,6 @@ networks:
     external: true
 "@
         }
-
         $result = Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "traefik" -ComposeContent $compose -OSType $os
         if ($result) { Write-LogSuccess -Message "Traefik deployed successfully on $IP" -Component "Deployment" }
         return $result
@@ -1297,10 +1642,27 @@ networks:
 #===============================================================================
 #region WSL2 SETUP FUNCTIONS (WINDOWS)
 #===============================================================================
-
 <#
 .SYNOPSIS
     Evaluates a Windows machine's state against WSL2 requirements.
+.DESCRIPTION
+    WHAT IT DOES: Validates the prerequisites required for running Linux environments on a Windows host.
+    HOW IT WORKS: 
+        1. Issues a WinRM block using `Get-WindowsOptionalFeature`.
+        2. Probes for `Microsoft-Windows-Subsystem-Linux` and `VirtualMachinePlatform`.
+        3. Asserts that the WSL2 Kernel is installed (checking for "must be updated" outputs).
+        4. Confirms that the target distribution (e.g. `Ubuntu-22.04`) is loaded.
+    WHY IT IS NEEDED: Used to conditionally skip steps in the heavy `Install-WSL2` orchestrator function, accelerating the deployment when running against pre-configured servers.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Windows Username.
+.PARAMETER Password
+    Target Windows Password.
+.PARAMETER Distribution
+    The WSL distribution string. Defaults to "Ubuntu-22.04".
+.OUTPUTS
+    A Hashtable mapping various boolean statuses (`Ready`, `NeedsReboot`, `NeedsInstall`) used to control pipeline flow.
 #>
 function Test-WSLReady {
     param ([string]$IP, [string]$User, [string]$Password, [string]$Distribution = "Ubuntu-22.04")
@@ -1372,6 +1734,27 @@ function Test-WSLReady {
 <#
 .SYNOPSIS
     Automated WSL2 deployment. Uses Start-Process to avoid WinRM pipeline corruption.
+.DESCRIPTION
+    WHAT IT DOES: Executes the remote WSL2 `Ubuntu` installation protocol unattended.
+    HOW IT WORKS: 
+        1. Employs `Start-Process -FilePath "wsl.exe" -ArgumentList "--install -d Ubuntu-22.04 --no-launch"` remotely.
+        2. Loops up to 12 times waiting for the distribution unpacking operation to finalize in the background before priming it.
+        3. Connects to `Invoke-WSL2Reboot` if the host requires a restart to finish hardware configuration.
+    WHY IT IS NEEDED: Remote WinRM PowerShell sessions frequently crash (pipe drops) when attempting to natively execute `wsl --install`. Wrapping the execution inside `Start-Process` physically detaches it from the unstable remote pipeline so the Windows kernel can complete the installation transparently.
+.PARAMETER IP
+    Target IP.
+.PARAMETER User
+    Target Windows Username.
+.PARAMETER Password
+    Target Windows Password.
+.PARAMETER Distribution
+    Defaults to "Ubuntu-22.04".
+.PARAMETER AutoReboot
+    A Switch indicating whether the target is authorized to immediately execute an unexpected hard-reboot.
+.PARAMETER WaitForReboot
+    A Switch indicating the local script should actively sleep and poll until the WinRM service responds again.
+.OUTPUTS
+    A Hashtable tracking overall Success status, Reboot flags, and Debug logs.
 #>
 function Install-WSL2 {
     param ([string]$IP, [string]$User, [string]$Password, [string]$Distribution = "Ubuntu-22.04", [switch]$AutoReboot, [switch]$WaitForReboot)
@@ -1513,8 +1896,25 @@ function Install-WSL2 {
 .SYNOPSIS
     Reboots the target Windows host and waits for WinRM to return.
 .DESCRIPTION
-    Why: Manages the required system restarts for enabling nested virtualization 
-    features. Tracks reboot attempts to prevent infinite loops.
+    WHAT IT DOES: Emits the `Restart-Computer` signal and manages reconnection logic.
+    HOW IT WORKS: 
+        1. Pushes the script's specific server IP to the internal dictionary `$script:WSL2RebootCount`.
+        2. Guards against infinite failure loops (e.g. aborts if the attempt count exceeds 2).
+        3. Forces the remote machine restart.
+        4. If `$WaitForReboot` is true, begins polling via `Test-WinRMConnection` every 15 seconds up to 10 minutes until the remote environment responds.
+    WHY IT IS NEEDED: Windows requires a strict cold restart to mount the Hyper-V kernel configurations necessary to run WSL2. This module forces the host machine to pause its background workflow threads and quietly wait for the system to resume.
+.PARAMETER IP
+    Target Windows IP.
+.PARAMETER User
+    Target Windows Username.
+.PARAMETER Password
+    Target Windows Password.
+.PARAMETER Distribution
+    A distribution trace variable.
+.PARAMETER WaitForReboot
+    A Switch dictating polling behavior.
+.OUTPUTS
+    Hashtable with Success boolean and context messages.
 #>
 function Invoke-WSL2Reboot {
     param (

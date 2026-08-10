@@ -4,6 +4,8 @@ A high-performance, multithreaded PowerShell orchestration tool with a rich WPF-
 
 By combining SSH and WinRM execution with parallel runspaces, the tool can orchestrate multi-server deployments much faster than a sequential workflow.
 
+> **Disclaimer:** Portions of this project, including its code and documentation, were generated, optimized, and refined with the assistance of Artificial Intelligence (AI).
+
 ---
 
 ## ✨ Key Features

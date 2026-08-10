@@ -96,7 +96,6 @@ $logPath = Initialize-Logging -LogLevel "Info" -LogToFile $true -LogToConsole $f
 Write-SessionSeparator -SessionName "Automated Server Setup Tool"
 Write-LogInfo -Message "Application started" -Component "GUI"
 
-
 #Gui Design XML
 [xml]$xaml = @"
 <Window 
@@ -162,11 +161,16 @@ $script:terminalMode = "Simple"  # Default terminal mode: Simple or Advanced
 
 <#
 .SYNOPSIS
-    Writes colored, formatted text to the WPF terminal output area.
+    Writes colored, formatted text to the WPF terminal output area safely across threads.
 .DESCRIPTION
-    Because background runspaces cannot directly modify WPF UI elements (cross-thread violation), 
-    this function uses `$script:terminalOutput.Dispatcher.Invoke` to safely push text updates 
-    to the main UI thread. It also handles timestamp prefixes when in 'Advanced' mode.
+    WHAT IT DOES: Pushes string messages to the RichTextBox UI element, applying specific colors based on the context of the message.
+    HOW IT WORKS: 
+        1. Because the background deployment runspaces cannot directly modify WPF UI elements (which causes a cross-thread violation crash), this function wraps the UI update in `$script:terminalOutput.Dispatcher.Invoke`. This forces the background thread to safely hand the message back to the main UI thread.
+        2. It creates a new `Paragraph` and `Run` object for the WPF document.
+        3. If `$script:terminalMode` is set to "Advanced", it prepends a timestamp to the message.
+        4. It maps the provided color string to a standard `System.Windows.Media.Brushes` color.
+        5. It appends the text and forces the text box to scroll to the bottom.
+    WHY IT IS NEEDED: Required to provide real-time feedback to the user without freezing the GUI during long parallel deployments.
 .PARAMETER Message
     The string message to display in the terminal.
 .PARAMETER Color
@@ -214,9 +218,14 @@ function Write-TerminalOutput {
 .SYNOPSIS
     Dynamically generates and adds a new server configuration group to the UI.
 .DESCRIPTION
-    Instead of hardcoding a fixed number of server inputs, this function programmatically builds 
-    WPF elements (TextBoxes, ComboBoxes, CheckBoxes) and appends them to the main StackPanel. 
-    It stores object references in `$script:serverControls` so their values can be retrieved later.
+    WHAT IT DOES: Creates a new visual block of input fields (IP, User, Password, Service, etc.) and injects it into the main window.
+    HOW IT WORKS: 
+        1. Increments the global `$script:serverCount`.
+        2. Programmatically instantiates WPF objects (`GroupBox`, `Grid`, `TextBox`, `ComboBox`, `CheckBox`).
+        3. Scans the local `configs\services` directory to dynamically populate the Service dropdown menu with available YAML files.
+        4. Injects these elements into the `ServerContainer` StackPanel.
+        5. Saves the actual object references of these input fields into the `$script:serverControls` array so their text values can be retrieved later during deployment.
+    WHY IT IS NEEDED: Prevents hardcoding a fixed number of servers. Allows the user to scale their deployment to 1, 5, or 50 servers dynamically.
 .OUTPUTS
     None. Appends XAML elements to the UI.
 #>
@@ -316,9 +325,13 @@ function Add-ServerBox {
 .SYNOPSIS
     Gathers the user inputs from all dynamically created Server UI blocks.
 .DESCRIPTION
-    Iterates through the UI control references and maps them into an array of PSCustomObjects. 
-    It uses the unary comma (,$allConfigs) in the return statement to explicitly prevent 
-    PowerShell from automatically "unrolling" single-item arrays.
+    WHAT IT DOES: Maps the raw UI control text fields into an array of structured configuration objects.
+    HOW IT WORKS: 
+        1. Iterates through the `$script:serverControls` array (which stores the UI object references).
+        2. Extracts the `.Text`, `.Password`, and `.IsChecked` properties from the WPF components.
+        3. Ensures custom ports default to 22 (SSH) or 5985 (WinRM) if the user accidentally clears the box.
+        4. It uses the unary comma (,$allConfigs) in the return statement to explicitly prevent PowerShell from automatically "unrolling" single-item arrays, ensuring consistency in downstream loops.
+    WHY IT IS NEEDED: Normalizes user inputs into a structured format (`PSCustomObject`) that can be safely passed as parameters to backend validation and deployment functions.
 .OUTPUTS
     Array of PSCustomObjects containing the IP, Credentials, and Configuration for each server.
 #>
@@ -356,8 +369,11 @@ function Get-AllServerConfigs {
 .SYNOPSIS
     Validates if a string is a properly formatted IPv4 address or Hostname.
 .DESCRIPTION
-    Runs early validation to ensure malformed IPs are caught before background threads 
-    attempt to initiate connections, which would otherwise result in long TCP timeout waits.
+    WHAT IT DOES: Confirms the user entered a real network address.
+    HOW IT WORKS:
+        1. Attempts to parse the string using `[System.Net.IPAddress]::Parse`. If it has exactly 4 octets, it approves it as an IPv4 address.
+        2. If parsing fails, it runs the string against a standard Hostname Regular Expression to verify it follows domain naming standards (e.g., `server.local`).
+    WHY IT IS NEEDED: Runs early validation to ensure malformed IPs are caught *before* background threads attempt to initiate connections. This prevents the tool from hanging for several minutes due to raw TCP connection timeouts.
 .PARAMETER IP
     The IP string or Hostname to validate.
 .OUTPUTS
@@ -402,9 +418,13 @@ function Test-IPAddress {
 .SYNOPSIS
     Validates the array of server configurations for empty fields and logic errors.
 .DESCRIPTION
-    Iterates through the collected form data to enforce business logic: ensures usernames, IPs, 
-    and passwords exist, verifies that at least one remote connection protocol is enabled, and 
-    checks that custom ports are within the 1-65535 valid TCP range.
+    WHAT IT DOES: Scans the mapped configuration array to ensure all mandatory deployment data is present.
+    HOW IT WORKS: Iterates through the collected form data to enforce business logic:
+        1. Ensures IP, Username, Password, and Service fields are not null.
+        2. Calls `Test-IPAddress` to guarantee the IP/Hostname is routable.
+        3. Verifies that at least *one* remote connection protocol (SSH or WinRM) is enabled.
+        4. Checks that custom ports fall within the valid TCP range of 1 to 65535.
+    WHY IT IS NEEDED: Prevents the deployment logic from throwing terminating pipeline errors due to missing or invalid argument types.
 .PARAMETER Configs
     The array of PSCustomObjects returned by Get-AllServerConfigs.
 .OUTPUTS
@@ -452,9 +472,11 @@ $script:terminalOutput = $window.FindName("TerminalOutput")
 .SYNOPSIS
     Visually updates the Simple and Advanced terminal mode toggle buttons.
 .DESCRIPTION
-    Swaps background and foreground colors to indicate which terminal verbosity mode is active.
+    WHAT IT DOES: Modifies the GUI styling to indicate the current verbosity level.
+    HOW IT WORKS: Uses a `BrushConverter` to swap background (`#4A90E2` Blue) and foreground colors between the two buttons based on the `$script:terminalMode` state variable.
+    WHY IT IS NEEDED: Provides clear visual feedback to the user regarding which log-filtering logic is currently engaged.
 .OUTPUTS
-    None. Modifies the UI.
+    None. Modifies the UI directly.
 #>
 function Update-TerminalModeButtons {
     $brushConverter = New-Object System.Windows.Media.BrushConverter
@@ -478,11 +500,15 @@ Update-TerminalModeButtons
 .SYNOPSIS
     Creates and manages the dedicated Health Monitor UI window.
 .DESCRIPTION
-    Because health polling is slow, this window spins up parallel runspaces to poll servers via SSH/WinRM 
-    in the background. It uses a DispatcherTimer to sweep an output queue and update the UI securely, 
-    preventing the WPF application from freezing during network waits.
+    WHAT IT DOES: Renders a comprehensive dashboard displaying real-time server metrics (CPU, RAM, Uptime) and a list of running Docker containers for every configured server.
+    HOW IT WORKS: 
+        1. Parses an entirely separate, massive XAML string to build the sub-window.
+        2. Contains nested UI drawing functions (`New-ServerHealthCard`, `New-ContainerHealthCard`) that construct visual blocks dynamically based on the health data returned by the backend.
+        3. Initiates a highly complex multi-threading routine via `Refresh-HealthData`. Because polling WMI/SSH on multiple servers takes a long time, it spins up parallel runspaces to fetch data silently while a `DispatcherTimer` periodically sweeps the result queue.
+        4. Provides action buttons (Start/Stop/Restart) for containers by storing secure credentials inside the UI element's `.Tag` property.
+    WHY IT IS NEEDED: Allows operators to monitor and actively manage their fleet without needing to log in to separate Portainer instances or issue manual CLI commands.
 .PARAMETER ServerConfigs
-    Array of validated server configurations to monitor.
+    Array of validated server configurations (`PSCustomObject`) providing the IPs and credentials to monitor.
 .OUTPUTS
     None. Renders an interactive modal window.
 #>
@@ -597,7 +623,7 @@ function Show-HealthMonitorWindow {
     .SYNOPSIS
         Thread-safely writes to the generated Health Report RichTextBox.
     .DESCRIPTION
-        Uses WPF Dispatcher to push formatted string chunks from the background report builder.
+        Uses WPF Dispatcher to push formatted string chunks from the background report builder safely.
     #>
     function Write-ReportOutput {
         param([string]$Message, [string]$Color = "White")
@@ -741,7 +767,6 @@ function Show-HealthMonitorWindow {
         }
         
         [void]$grid.Children.Add($metricsPanel)
-        
         $border.Child = $grid
         return $border
     }
@@ -926,7 +951,6 @@ function Show-HealthMonitorWindow {
                 [void]$actionPanel.Children.Add($btnStop)
                 [void]$actionPanel.Children.Add($btnRestart)
                 [void]$containerGrid.Children.Add($actionPanel)
-                # ---------------------------
                 
                 $containerBorder.Child = $containerGrid
                 [void]$mainStack.Children.Add($containerBorder)
@@ -1518,8 +1542,12 @@ function Show-HealthMonitorWindow {
 .SYNOPSIS
     Pops up a window for users to manage Docker Compose YAML files.
 .DESCRIPTION
-    Instead of hardcoding files or making the user edit text manually, this allows on-the-fly 
-    creation, editing, and deletion of service configurations from the local directory.
+    WHAT IT DOES: Opens an integrated text editor connected to the local `configs\services` directory.
+    HOW IT WORKS: 
+        1. Parses an XML string into a WPF Window with a `ListBox` and `TextBox`.
+        2. Populates the `ListBox` with all `.yml` files in the directory.
+        3. Updating the text in the `TextBox` and hitting "Save" rewrites the file to disk with UTF8 encoding.
+    WHY IT IS NEEDED: Prevents users from having to navigate through the file system and use external editors (like Notepad or VS Code) to tweak service configuration files before deploying.
 .OUTPUTS
     None. Displays an interactive WPF sub-window.
 #>
@@ -1623,6 +1651,8 @@ Write-TerminalOutput -Message "  Simple   - Shows major status updates only" -Co
 Write-TerminalOutput -Message "  Advanced - Shows all setup details (SSH commands, Docker output)" -Color "Gray"
 Write-TerminalOutput -Message "" -Color "White"
 
+
+# --- CLICK HANDLERS WITH PROPER CLOSURES ---
 $addServerButton.Add_Click({
     Add-ServerBox
     Write-TerminalOutput -Message "Added Server $($script:serverCount)" -Color "Green"
