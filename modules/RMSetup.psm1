@@ -31,8 +31,8 @@ $script:LogLevels = @{
 # WSL2 reboot tracking (prevents infinite reboot loops)
 $script:WSL2RebootCount = @{}
 #endregion
-#===============================================================================
 
+#===============================================================================
 #region LOGGING FUNCTIONS
 #===============================================================================
 
@@ -293,6 +293,7 @@ function Clear-OldLogs {
 function Write-SessionSeparator {
     param([string]$SessionName = "New Session")
     $separator = @"
+
 ================================================================================
 === $SessionName - $(Get-Date -Format "yyyy-MM-dd HH:mm:ss")
 ================================================================================
@@ -417,7 +418,7 @@ function Test-SSHConnection {
 .SYNOPSIS
     Tests raw WinRM connectivity.
 .DESCRIPTION
-    Why: Passes -SkipCACheck and -SkipCNCheck to ensure connection works immediately on Homelab
+    Why: Passes -SkipCACheck and -SkipCNCheck to ensure connection works immediately on Homelab 
     targets utilizing self-signed default certificates. Will attempt to start the WinRM service if stopped.
 #>
 function Test-WinRMConnection {
@@ -450,7 +451,7 @@ function Test-WinRMConnection {
 .SYNOPSIS
     Validates global reachability.
 .DESCRIPTION
-    Why: Attempts multiple ICMP pings before attempting to delegate to the heavier
+    Why: Attempts multiple ICMP pings before attempting to delegate to the heavier 
     TCP tests (Test-SSHConnection or Test-WinRMConnection).
 #>
 function Test-RemoteConnection {
@@ -520,7 +521,7 @@ function Invoke-WSLCommand {
             
             $cleanOutput = $rawOutput -replace "\x00", ""
             $cleanOutput = $cleanOutput -replace "(?mi)^\s*wsl: Failed to start the systemd user session.*$\r?\n?", ""
-            $cleanOutput = $cleanOutput -replace "(?mi)^\s*獷㩬䘠楡敬⁤潴猠慴瑲琠敨猠獹整摭甠敳⁲敳獳潩⁮潦⁲爧潯❴.*$\r?\n?", ""
+            $cleanOutput = $cleanOutput -replace "(?mi)^\s* .*$\r?\n?", ""
             $cleanOutput = $cleanOutput.Trim()
             
             return @{ Output = $cleanOutput; ExitCode = 0; WSLNotReady = $false }
@@ -543,7 +544,7 @@ function Invoke-WSLCommand {
 .SYNOPSIS
     The core transport router executing commands on remote targets.
 .DESCRIPTION
-    Why: Abstracts away the protocol logic. If the target is Linux, it executes via PuTTY (plink)
+    Why: Abstracts away the protocol logic. If the target is Linux, it executes via PuTTY (plink) 
     using the `-batch` and `-pw` flags. If the target is Windows, it routes it to `Invoke-WSLCommand`.
 .PARAMETER Command
     The bash payload to execute.
@@ -598,7 +599,7 @@ function Invoke-RemoteCommand {
 .SYNOPSIS
     Fetches raw host machine hardware metrics.
 .DESCRIPTION
-    Why: Delegates to OS-specific fetching functions after verifying the machine is
+    Why: Delegates to OS-specific fetching functions after verifying the machine is 
     still responding to an ICMP ping, returning an object mapped explicitly for the GUI.
 #>
 function Get-ServerHealth {
@@ -612,7 +613,7 @@ function Get-ServerHealth {
         }
         
         $osType = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
-        if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password -OSType $osType }
+        if ($osType -eq "Linux") { return Get-LinuxServerHealth -IP $IP -User $User -Password $Password -OSType $osType }
         elseif ($osType -eq "Windows") { return Get-WindowsServerHealth -IP $IP -User $User -Password $Password }
         else { 
             Write-LogWarning -Message "OS Type unknown for $IP during health check." -Component "HealthMonitor"
@@ -629,7 +630,7 @@ function Get-ServerHealth {
 .SYNOPSIS
     Fetches hardware metrics from a Linux target.
 .DESCRIPTION
-    Why: Formats a massive single bash string wrapping `top`, `free`, `df`, and `uptime`
+    Why: Formats a massive single bash string wrapping `top`, `free`, `df`, and `uptime` 
     to parse memory and CPU blocks remotely, preventing the need for multiple heavy SSH connections.
 #>
 function Get-LinuxServerHealth {
@@ -717,7 +718,7 @@ echo '===LOAD===' && cat /proc/loadavg | awk '{print `$1, `$2, `$3}'
 .SYNOPSIS
     Fetches hardware metrics from a Windows target.
 .DESCRIPTION
-    Why: Uses native `Get-CimInstance` WMI requests passed through WinRM to gather load values
+    Why: Uses native `Get-CimInstance` WMI requests passed through WinRM to gather load values 
     natively without invoking WSL.
 #>
 function Get-WindowsServerHealth {
@@ -753,8 +754,8 @@ function Get-WindowsServerHealth {
 .SYNOPSIS
     Queries Docker stats and metadata.
 .DESCRIPTION
-    Why: Drastically optimized to query container lists, resource stats, and health checks
-    concurrently through one massive inline bash subshell (`docker ps -aq`). This prevents the script
+    Why: Drastically optimized to query container lists, resource stats, and health checks 
+    concurrently through one massive inline bash subshell (`docker ps -aq`). This prevents the script 
     from opening separate SSH connections per container, dropping execution time from >4 mins to 3 seconds.
 #>
 function Get-ContainerHealth {
@@ -997,8 +998,8 @@ function Test-CommonServices {
 .SYNOPSIS
     Universal Docker Compose deploying wrapper.
 .DESCRIPTION
-    Why: Instead of opening a new SSH connection for every single command (mkdir, compose down, echo, compose up),
-    we parse the inputs and construct a massive batched bash string separated by semicolons.
+    Why: Instead of opening a new SSH connection for every single command (mkdir, compose down, echo, compose up), 
+    we parse the inputs and construct a massive batched bash string separated by semicolons. 
     This reduces a sequential setup into a single ~15-second remote payload.
     It also natively checks for port 53 allocations to forcefully disable systemd-resolved conflicts automatically.
 #>
@@ -1148,7 +1149,6 @@ function Install-DockerWSL2 {
             
             Remove-PSSession -Session $session
         }
-
         $dockerCheck = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command "docker --version" -OSType $os
         if ($null -ne $dockerCheck -and $dockerCheck -match "Docker version") { 
             Write-LogInfo -Message "Docker is already installed on $IP" -Component "Deployment"
@@ -1157,29 +1157,24 @@ function Install-DockerWSL2 {
         
         $installCmd = @"
 export DEBIAN_FRONTEND=noninteractive
-
 while [ "`$(systemctl is-system-running 2>/dev/null)" = "starting" ]; do sleep 1; done
 sleep 15
-
 systemctl stop systemd-resolved 2>/dev/null || true
 systemctl disable systemd-resolved 2>/dev/null || true
 rm -f /etc/resolv.conf
 echo 'nameserver 8.8.8.8' > /etc/resolv.conf
-
 apt-get update -y
 apt-get install -y ca-certificates curl gnupg lsb-release
 mkdir -p /etc/apt/keyrings
 curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
 chmod a+r /etc/apt/keyrings/docker.gpg
 echo "deb [arch=`$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu `$(lsb_release -cs) stable" > /etc/apt/sources.list.d/docker.list
-
 apt-get update -y
 apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
 systemctl enable docker
 systemctl start docker || true
 usermod -aG docker $User
 "@
-        
         Write-LogInfo -Message "Running Docker installation script on $IP..." -Component "Deployment"
         $dockerOutput = Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $installCmd -OSType $os
         
@@ -1210,12 +1205,20 @@ usermod -aG docker $User
 .SYNOPSIS
     Deploys Traefik reverse proxy.
 .DESCRIPTION
-    Why: Before invoking the standard `Deploy-DockerService`, this explicitly touches and
-    sets 600 permissions on the `acme.json` file. Traefik will purposefully crash if this file
+    Why: Before invoking the standard `Deploy-DockerService`, this explicitly touches and 
+    sets 600 permissions on the `acme.json` file. Traefik will purposefully crash if this file 
     does not have exact 600 permissions prior to container execution.
 #>
 function Install-Traefik {
-    param([string]$IP, [string]$User, [string]$Password, [string]$Email = "admin@localhost", [string]$Domain = "localhost", [string]$OSType = $null)
+    param(
+        [string]$IP, 
+        [string]$User, 
+        [string]$Password, 
+        [string]$Email = "admin@localhost", 
+        [string]$Domain = "localhost", 
+        [string]$OSType = $null,
+        [string]$ComposeContent = $null
+    )
     Write-LogDebug -Message "Entering Install-Traefik for IP: $IP" -Component "Deployment"
     try {
         $os = if (-not [string]::IsNullOrEmpty($OSType)) { $OSType } else { Get-TargetOS -IP $IP }
@@ -1257,7 +1260,9 @@ log:
         $batchCmd = "mkdir -p /home/$User/traefik/letsencrypt && touch /home/$User/traefik/letsencrypt/acme.json && chmod 600 /home/$User/traefik/letsencrypt/acme.json && echo '$configBase64' | base64 -d > /home/$User/traefik/traefik.yml"
         Invoke-RemoteCommand -IP $IP -User $User -Password $Password -Command $batchCmd -OSType $os | Out-Null
         
-        $compose = @"
+        $compose = $ComposeContent
+        if ([string]::IsNullOrWhiteSpace($compose)) {
+            $compose = @"
 services:
   traefik:
     image: traefik:latest
@@ -1277,6 +1282,8 @@ networks:
   traefik-network:
     external: true
 "@
+        }
+
         $result = Deploy-DockerService -IP $IP -User $User -Password $Password -ServiceName "traefik" -ComposeContent $compose -OSType $os
         if ($result) { Write-LogSuccess -Message "Traefik deployed successfully on $IP" -Component "Deployment" }
         return $result
@@ -1417,7 +1424,7 @@ function Install-WSL2 {
                     $debugLog += "Verifying installation..."
                     $verifyProc = Start-Process -FilePath $wslPath -ArgumentList "--status" -Wait -PassThru -NoNewWindow
                     $debugLog += "wsl.exe --status finished with ExitCode: $($verifyProc.ExitCode)"
-
+                    
                     $debugLog += "Waiting for distribution $DistroName to register..."
                     $distroReady = $false
                     for ($distroAttempt = 1; $distroAttempt -le 12; $distroAttempt++) {
@@ -1428,16 +1435,15 @@ function Install-WSL2 {
                             $distroReady = $true
                             break
                         }
-
                         $debugLog += "Distribution $DistroName not ready yet (attempt $distroAttempt/12); waiting 10 seconds..."
                         Start-Sleep -Seconds 10
                     }
-
+                    
                     if (-not $distroReady) {
                         $debugLog += "Distribution $DistroName did not register in time."
                         return @{ Success = $false; NeedsReboot = $true; Ready = $false; Message = "WSL installed but distribution '$DistroName' is not available yet."; DebugLog = $debugLog }
                     }
-
+                    
                     $debugLog += "Priming distribution $DistroName..."
                     $primeProc = Start-Process -FilePath $wslPath -ArgumentList "-d $DistroName -u root -- bash -lc `"echo WSL_READY_TEST`"" -Wait -PassThru -NoNewWindow
                     $debugLog += "wsl.exe prime run finished with ExitCode: $($primeProc.ExitCode)"
@@ -1507,7 +1513,7 @@ function Install-WSL2 {
 .SYNOPSIS
     Reboots the target Windows host and waits for WinRM to return.
 .DESCRIPTION
-    Why: Manages the required system restarts for enabling nested virtualization
+    Why: Manages the required system restarts for enabling nested virtualization 
     features. Tracks reboot attempts to prevent infinite loops.
 #>
 function Invoke-WSL2Reboot {
@@ -1578,6 +1584,7 @@ function Invoke-WSL2Reboot {
 #===============================================================================
 #region MODULE EXPORTS
 #===============================================================================
+
 Export-ModuleMember -Function @(
     'Initialize-Logging', 'Set-LogConfiguration', 'Write-Log', 'Write-LogDebug', 'Write-LogInfo', 'Write-LogWarning', 'Write-LogError', 'Write-LogSuccess', 'Get-LogFilePath', 'Get-LogContent', 'Clear-OldLogs', 'Write-SessionSeparator',
     'Get-TargetOS', 'Test-SSHConnection', 'Test-WinRMConnection', 'Test-RemoteConnection', 'Invoke-WSLCommand', 'Invoke-RemoteCommand',

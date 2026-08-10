@@ -11,8 +11,9 @@ if (-not $scriptRoot) { $scriptRoot = Get-Location }
 $servicesDir = Join-Path $scriptRoot "configs\services"
 if (-not (Test-Path $servicesDir)) {
     New-Item -ItemType Directory -Path $servicesDir -Force | Out-Null
-    
-    $defaultPortainer = @"
+}
+
+$defaultPortainer = @"
 services:
   portainer:
     container_name: portainer
@@ -32,15 +33,17 @@ services:
       - "traefik.http.routers.portainer.tls.certresolver=letsencrypt"
       - "traefik.http.services.portainer.loadbalancer.server.port=9443"
       - "traefik.http.services.portainer.loadbalancer.server.scheme=https"
-
 networks:
   traefik-network:
     external: true
 "@
+
+if (-not (Test-Path (Join-Path $servicesDir "Portainer.yml"))) {
     $defaultPortainer | Out-File (Join-Path $servicesDir "Portainer.yml") -Encoding UTF8
-    
-    #Default config for Portainer without Traefik
-    $defaultPortainerNoTraefik = @"
+}
+
+#Default config for Portainer without Traefik
+$defaultPortainerNoTraefik = @"
 services:
   portainer:
     container_name: portainer
@@ -53,7 +56,35 @@ services:
       - "9000:9000"
       - "9443:9443"
 "@
+
+if (-not (Test-Path (Join-Path $servicesDir "Portainer-NoTraefik.yml"))) {
     $defaultPortainerNoTraefik | Out-File (Join-Path $servicesDir "Portainer-NoTraefik.yml") -Encoding UTF8
+}
+
+# Default config for Traefik so it can be edited in the Services window
+$defaultTraefik = @"
+services:
+  traefik:
+    image: traefik:latest
+    container_name: traefik
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./traefik.yml:/traefik.yml:ro
+      - ./letsencrypt:/letsencrypt
+    networks:
+      - traefik-network
+networks:
+  traefik-network:
+    external: true
+"@
+
+if (-not (Test-Path (Join-Path $servicesDir "Traefik.yml"))) {
+    $defaultTraefik | Out-File (Join-Path $servicesDir "Traefik.yml") -Encoding UTF8
 }
 # ---------------------------------------
 
@@ -64,6 +95,7 @@ Import-Module (Join-Path $scriptRoot "modules\RMSetup.psm1") -Force -Scope Globa
 $logPath = Initialize-Logging -LogLevel "Info" -LogToFile $true -LogToConsole $false
 Write-SessionSeparator -SessionName "Automated Server Setup Tool"
 Write-LogInfo -Message "Application started" -Component "GUI"
+
 
 #Gui Design XML
 [xml]$xaml = @"
@@ -233,7 +265,9 @@ function Add-ServerBox {
         $serviceLabel = New-Object System.Windows.Controls.Label; $serviceLabel.Content = "Service:"; $serviceLabel.VerticalAlignment = "Center"; $serviceLabel.Margin = "0,5"
         [System.Windows.Controls.Grid]::SetRow($serviceLabel, 3); [System.Windows.Controls.Grid]::SetColumn($serviceLabel, 0); [void]$grid.Children.Add($serviceLabel)
         $serviceComboBox = New-Object System.Windows.Controls.ComboBox; $serviceComboBox.Height = 25; $serviceComboBox.Margin = "0,5"; $serviceComboBox.Name = "ServiceField$($script:serverCount)"
-        $serviceFiles = Get-ChildItem -Path $servicesDir -Filter "*.yml"
+        
+        # Exclude Traefik.yml from the dropdown list to avoid confusion
+        $serviceFiles = Get-ChildItem -Path $servicesDir -Filter "*.yml" | Where-Object { $_.BaseName -ne "Traefik" }
         foreach ($file in $serviceFiles) {
             $item = New-Object System.Windows.Controls.ComboBoxItem; $item.Content = $file.BaseName; [void]$serviceComboBox.Items.Add($item)
         }
@@ -477,7 +511,7 @@ function Show-HealthMonitorWindow {
         
         <!-- Control Bar -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,10">
-            <Button Name="RefreshButton" Content="🔄 Refresh All" Width="120" Height="30" Margin="0,0,10,0" FontSize="12"/>
+            <Button Name="RefreshButton" Content="  Refresh All" Width="120" Height="30" Margin="0,0,10,0" FontSize="12"/>
             <Button Name="AutoRefreshButton" Content="Auto-Refresh: OFF" Width="140" Height="30" Margin="0,0,10,0" FontSize="12"/>
             <Label Content="Interval:" VerticalAlignment="Center" Margin="10,0,5,0"/>
             <ComboBox Name="RefreshIntervalCombo" Width="80" Height="30" VerticalAlignment="Center">
@@ -538,6 +572,7 @@ function Show-HealthMonitorWindow {
     </Grid>
 </Window>
 "@
+
     $healthReader = New-Object System.Xml.XmlNodeReader $healthXaml
     $healthWindow = [Windows.Markup.XamlReader]::Load($healthReader)
     
@@ -1882,9 +1917,16 @@ $runSetupButton.Add_Click({
             
             if ($Config.UseTraefik) {
                 Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy..." -Color "Cyan" -ServerNum $serverNum
+                
+                $traefikComposeContent = $null
+                $traefikPath = Join-Path $ServicesDir "Traefik.yml"
+                if (Test-Path $traefikPath) {
+                    $traefikComposeContent = Get-Content $traefikPath -Raw
+                }
+
                 $traefikSuccess = $null
                 Invoke-WithOutput -ScriptBlock {
-                    $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password
+                    $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType -ComposeContent $traefikComposeContent
                 } -ServerNum $serverNum
                 $traefikSuccess = $script:traefikSuccess
                 
@@ -1954,8 +1996,15 @@ $runSetupButton.Add_Click({
             
             if ($Config.UseTraefik) {
                 Send-Output -Message "[Server $serverNum] Installing Traefik reverse proxy in WSL2..." -Color "Cyan" -ServerNum $serverNum
+                
+                $traefikComposeContent = $null
+                $traefikPath = Join-Path $ServicesDir "Traefik.yml"
+                if (Test-Path $traefikPath) {
+                    $traefikComposeContent = Get-Content $traefikPath -Raw
+                }
+
                 Invoke-WithOutput -ScriptBlock {
-                    $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType
+                    $script:traefikSuccess = Install-Traefik -IP $Config.IP -User $Config.User -Password $Config.Password -OSType $osType -ComposeContent $traefikComposeContent
                 } -ServerNum $serverNum
                 $traefikSuccess = $script:traefikSuccess
                 
