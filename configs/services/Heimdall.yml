@@ -1,0 +1,27 @@
+services:
+  heimdall:
+    image: lscr.io/linuxserver/heimdall:latest
+    container_name: heimdall
+    restart: always
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Europe/Brussels
+    volumes:
+      - ./data:/config
+    expose:
+      - 80
+    networks:
+      - traefik-network
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.heimdall.rule=Host('heimdall.localhost')"
+      - "traefik.http.routers.heimdall.entrypoints=websecure"
+      - "traefik.http.routers.heimdall.tls.certresolver=letsencrypt"
+      - "traefik.http.services.heimdall.loadbalancer.server.port=80"
+      - "traefik.http.services.heimdall.loadbalancer.server.scheme=http"
+
+networks:
+  traefik-network:
+    external: true
+
